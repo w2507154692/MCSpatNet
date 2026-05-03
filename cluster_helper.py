@@ -8,7 +8,7 @@ from skimage.measure import label
 from sklearn.cluster import KMeans
 
 
-device=torch.device('cuda')
+device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def collect_features(model, simple_train_loader, feature_indx_list):
 

@@ -22,7 +22,7 @@ checkpoints_folder_name = 'exp1_consep' # 当前训练实例的输出文件夹�
 model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
 clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
 train_data_root = './data/CoNSeP_train'
-test_data_root = './data/CoNSeP_test'
+test_data_root = './data/CoNSeP_train'   # 这是验证集，不是测试集！
 train_split_filepath = './data_splits/consep/train_split.txt'
 test_split_filepath = './data_splits/consep/val_split.txt'
 epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
@@ -52,17 +52,22 @@ if __name__=="__main__":
         os.mkdir(cluster_tmp_out)
 
 
+    # # log_file_path：训练日志文件的保存路径。
+    # i=1
+    # while(True):
+    #     log_file_path = os.path.join(checkpoints_root_dir, checkpoints_folder_name, f'train_log_{i}.txt') 
+    #     if(not os.path.exists(log_file_path)):
+    #         break
+    #     i +=1
+    
     # log_file_path：训练日志文件的保存路径。
-    i=1
-    while(True):
-        log_file_path = os.path.join(checkpoints_root_dir, checkpoints_folder_name, f'train_log_{i}.txt') 
-        if(not os.path.exists(log_file_path)):
-            break
-        i +=1
+    log_file_path = os.path.join(checkpoints_root_dir, checkpoints_folder_name, f'train_log.txt') 
 
+    
     start_epoch             = 0  # 如果从 model_param_path 加载历史模型继续训练，可在这里指定起始轮次。
     epoch_start_eval_prec   = 1 # 从该轮开始，在验证集上评估预测结果的 F-score。
     restart_epochs_freq     = 50 # 优化器的重置周期，用于避免 Adam 学习率状态逐渐失效。
+    # PROBLEM: 优化器重置是啥
     next_restart_epoch      = restart_epochs_freq + start_epoch
     gpu_or_cpu              = 'cuda' if torch.cuda.is_available() else 'cpu' # 自动选择设备，优先使用 CUDA，不可用时回退到 CPU。
     device=torch.device(gpu_or_cpu)
@@ -87,7 +92,7 @@ if __name__=="__main__":
     test_dots_root = os.path.join(test_data_root, 'gt_custom')
     test_dmap_subclasses_root = cluster_tmp_out
     test_dots_subclasses_root = test_dmap_subclasses_root
-    test_kmap_root = os.path.join(test_data_root, 'k_func_maps') 
+    test_kmap_root = os.path.join(test_data_root, 'k_func_maps')
     
 
     dropout_prob = 0.2
@@ -493,6 +498,7 @@ if __name__=="__main__":
             log_file.flush()
 
 
+        # KEY：权重保存
         # 根据验证集上的 F-score 判断当前是否为最佳 epoch。
         model_save_postfix = ''
         is_best_epoch = False
