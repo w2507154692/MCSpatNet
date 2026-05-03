@@ -12,41 +12,43 @@ device=torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def collect_features(model, simple_train_loader, feature_indx_list):
 
-    features_list = [[0]*len(simple_train_loader)] # list will hold the features extracted from each input image for each cell
-    coord_list = [[0]*len(simple_train_loader)] # list will hold coordinates of cells in  each input image
-    img_name_list = [0]*len(simple_train_loader) # list will hold filename of each input image
+    features_list = [[0]*len(simple_train_loader)] # 保存每张输入图像中每个细胞提取到的特征
+    coord_list = [[0]*len(simple_train_loader)] # 保存每张输入图像中细胞中心点的坐标
+    img_name_list = [0]*len(simple_train_loader) # 保存每张输入图像对应的文件名
     model.eval()
     with torch.no_grad():
         for i,(img,gt_dmap,gt_dots,img_name, padding) in enumerate(tqdm(simple_train_loader, disable=True)):
-            # padding: padding added to the image to make sure it is a multiple of 16 (corresponding to 4 max pool layers)
+            # padding 表示为适配网络下采样结构而补到图像四周的像素，
+            # 这样输入尺寸可以被 16 整除，对应网络中的 4 次最大池化
             pad_y1  = padding[0].numpy()[0]
             pad_y2  = padding[1].numpy()[0]
             pad_x1  = padding[2].numpy()[0]
             pad_x2  = padding[3].numpy()[0]
 
-            # set the image filename
+            # 记录当前图像文件名，并将图像张量移动到计算设备上
             img_name_list[i]=img_name[0]
             img=img.to(device)
 
-            # get the ground truth dot map for all cells without the padding
+            # 去掉 padding 后，得到所有细胞类别的真实中心点图
             gt_dots = gt_dots[:,:,pad_y1:gt_dots.shape[-2]-pad_y2,pad_x1:gt_dots.shape[-1]-pad_x2]
             gt_dots_all =  gt_dots.max(1)[0]
             gt_dots_all = gt_dots_all.detach().cpu().numpy().squeeze()
 
-            # get the image features from the model
+            # 前向提取模型特征，并同步去掉网络边缘裁剪区域及输入 padding 对应区域
             et_dmap_lst, img_feat=model(img, feature_indx_list)
             img_feat = img_feat[:,:,2:-2,2:-2]
             img_feat = img_feat[:,:,pad_y1:img_feat.shape[-2]-pad_y2,pad_x1:img_feat.shape[-1]-pad_x2]
             img_feat = img_feat.squeeze().transpose((1,2,0))
 
-            # set the cell coordinates
+            # 根据真实点图确定所有细胞中心坐标
             points = np.where(gt_dots_all > 0)
             coord_list[0][i] = points
             if(len(points[0])==0):
+                # 当前图像不存在细胞时，用 None 占位，方便后续聚类阶段跳过
                 features_list[0][i] = None
                 continue
 
-            # set the cell features
+            # 直接在特征图上索引细胞中心位置，得到每个细胞对应的特征向量
             img_feat = img_feat[points]
             features_list[0][i] = img_feat
 
@@ -55,38 +57,39 @@ def collect_features(model, simple_train_loader, feature_indx_list):
     return features_list, coord_list, img_name_list
         
 def collect_features_by_class(model, simple_train_loader, feature_indx_list, n_classes):
-
-    features_list = [[0]*len(simple_train_loader) for i in range(n_classes)]    # imp to avoid referencing the same list in all entries
-    coord_list = [[0]*len(simple_train_loader) for i in range(n_classes)] # imp to avoid referencing the same list in all entries
+    features_list = [[0]*len(simple_train_loader) for i in range(n_classes)]    # 为每个类别分别创建独立列表，避免多个类别引用同一对象；n_classes * [n_data]
+    coord_list = [[0]*len(simple_train_loader) for i in range(n_classes)] # 为每个类别分别保存每张图像中的细胞坐标；n_classes * [n_data]
     img_name_list = ['']*len(simple_train_loader)
     model.eval()
     with torch.no_grad():
+        # PROBLEM：这里面的gt_dmap密度图到底干啥用的，这里面也没用到
         for i,(img,gt_dmap,gt_dots,img_name, padding) in enumerate(tqdm(simple_train_loader, disable=True)):
-            # padding: padding added to the image to make sure it is a multiple of 16 (corresponding to 4 max pool layers)
+            # padding 表示为适配网络结构补到输入边界的像素范围
             pad_y1  = padding[0].numpy()[0]
             pad_y2  = padding[1].numpy()[0]
             pad_x1  = padding[2].numpy()[0]
             pad_x2  = padding[3].numpy()[0]
 
-            # set the image filename
+            # 记录图像文件名，并将图像送入相同设备
             img_name_list[i]=img_name[0]
             img=img.to(device)
 
-            # get the ground truth dot map for all cells without the padding
+            # 去除 padding 后，保留各个细胞类别的真实点图
             gt_dots = gt_dots[:,:,pad_y1:gt_dots.shape[-2]-pad_y2,pad_x1:gt_dots.shape[-1]-pad_x2]
             gt_dots = gt_dots.detach().cpu().numpy().squeeze()
 
-            # get the image features from the model
+            # 从模型中提取用于聚类的像素级特征，并对齐回原始有效区域
             et_dmap_lst, img_feat=model(img, feature_indx_list)
             img_feat = img_feat[:,:,2:-2,2:-2]
             img_feat = img_feat[:,:,pad_y1:img_feat.shape[-2]-pad_y2,pad_x1:img_feat.shape[-1]-pad_x2]
             img_feat = img_feat.squeeze().transpose((1,2,0))
 
-            # for each cell class, get the cell coordinates and center features
+            # 分类别收集细胞中心坐标以及这些中心点对应的特征向量
             for s in range(gt_dots.shape[0]):
                 points = np.where(gt_dots[s] > 0)
                 coord_list[s][i] = points
                 if(len(points[0])==0):
+                    # 当前图像中该类别没有细胞，后续聚类时直接跳过
                     features_list[s][i] = None
                     continue
                 img_feat_s = img_feat[points]
@@ -97,12 +100,13 @@ def collect_features_by_class(model, simple_train_loader, feature_indx_list, n_c
     return features_list, coord_list, img_name_list
     
 def cluster(features_list, coord_list, n_clusters, prev_centroids):
-    # For each class, get all features and do kmeans clustering, then use the fitted kmeans to get the pseudo clustering label for each cell
+    # 对每个类别分别汇总所有细胞特征，执行 KMeans 聚类，
+    # 再用训练好的聚类器为每个细胞生成伪子类标签
     cluster_centers_all = None
     pseudo_labels_list = [[0]*len(features_list[0]) for i in range(len(features_list))]
     for s in range(len(features_list)):
         features = None
-        # Concatenate all features from cells in the current class
+        # 拼接当前类别下所有图像中的细胞特征，形成一个总的聚类输入矩阵
         for i in range(len(features_list[s])):
             if(features_list[s][i] is None):
                 continue
@@ -111,13 +115,13 @@ def cluster(features_list, coord_list, n_clusters, prev_centroids):
             else:
                 features = np.concatenate((features, features_list[s][i]), axis=0)
 
-        # To have a more stable clustering, we initialize kmeans centroids with previous clustering centroids
+        # 为了让相邻轮次的聚类结果更稳定，可以使用上一轮的聚类中心作为初始化
         if(prev_centroids is None):
             kmeans = KMeans(n_clusters=n_clusters, random_state=0).fit(features)
         else:
             kmeans = KMeans(n_clusters=n_clusters, init=prev_centroids[s*n_clusters:s*n_clusters+n_clusters]).fit(features)
 
-        # Predict the cluster label for each cell
+        # 对该类别下每张图像中的每个细胞预测其所属的子簇标签
         for i in range(len(features_list[s])):
             if(features_list[s][i] is None):
                 pseudo_labels_list[s][i] = None
@@ -128,30 +132,31 @@ def cluster(features_list, coord_list, n_clusters, prev_centroids):
         else:
             cluster_centers_all = np.concatenate((cluster_centers_all, kmeans.cluster_centers_), axis=0)
 
-    # return the cluster labels and the centroids
+    # 返回每个细胞的伪子类标签，以及所有类别的聚类中心
     return pseudo_labels_list, cluster_centers_all
 
 def create_pseudo_lbl_gt(simple_train_loader, pseudo_labels_list, coord_list, img_name_list, n_clusters, out_dir):
-    n_subclasses = len(pseudo_labels_list) * n_clusters # number of sub classes is number of cell classes * number of clusters
+    n_subclasses = len(pseudo_labels_list) * n_clusters # 子类总数 = 细胞大类数 × 每类聚类数
     for i,(img,gt_dmap,gt_dots,img_name, padding) in enumerate(tqdm(simple_train_loader, disable=True)):
         ''' 
-            img: input image
-            gt_dmap: ground truth map for cell classes (lymphocytes, epithelial/tumor, stromal) with dilated dots. This can be a binary mask or a density map ( in which case it will be converted to a binary mask)
-            gt_dots: ground truth binary dot map for cell classes (lymphocytes, epithelial/tumor, stromal). 
-            img_name: img filename
-            padding: padding added to the image to make sure it is a multiple of 16 (corresponding to 4 max pool layers)
+            img: 输入图像。
+            gt_dmap: 细胞类别的真实区域图，通常是膨胀后的点图。
+                     它可能是二值 mask，也可能是密度图；若是密度图，下面会转成二值 mask。
+            gt_dots: 细胞类别的真实二值中心点图。
+            img_name: 图像文件名。
+            padding: 为使输入尺寸能被 16 整除而在四周补的边界像素。
         '''
         pad_y1  = padding[0].numpy()[0]
         pad_y2  = padding[1].numpy()[0]
         pad_x1  = padding[2].numpy()[0]
         pad_x2  = padding[3].numpy()[0]
-        # get the ground truth maps without the padding
+        # 去掉 padding，恢复到真实有效区域上的标注图
         gt_dmap = gt_dmap[:,:,pad_y1:gt_dmap.shape[-2]-pad_y2,pad_x1:gt_dmap.shape[-1]-pad_x2]
         gt_dots = gt_dots[:,:,pad_y1:gt_dots.shape[-2]-pad_y2,pad_x1:gt_dots.shape[-1]-pad_x2]
-        # Convert ground truth maps to binary mask (in case they were density maps)
+        # 若真实区域图是密度图，则转换为二值 mask，便于后续连通域操作
         gt_dmap = gt_dmap > 0
 
-        # Initialize the ground truth maps for the clustering sub-classes
+        # 初始化聚类子类对应的真实点图和真实区域图
         gt_dmap_all =  gt_dmap.max(1)[0]
         gt_dots_all =  gt_dots.max(1)[0] 
         gt_dmap_all = gt_dmap_all.detach().cpu().numpy().squeeze()
@@ -159,6 +164,7 @@ def create_pseudo_lbl_gt(simple_train_loader, pseudo_labels_list, coord_list, im
         gt_dots_subclasses = np.zeros((gt_dots_all.shape[0], gt_dots_all.shape[1], n_subclasses+1))
         gt_dmap_subclasses = np.zeros((gt_dots_all.shape[0], gt_dots_all.shape[1], n_subclasses+1))
 
+        # 先对全部细胞区域做连通域标记，后面会把同一细胞区域整体分配到对应子类
         label_comp = label(gt_dmap_all)
         cci = 0
         for s in range(len(pseudo_labels_list)):
@@ -169,47 +175,49 @@ def create_pseudo_lbl_gt(simple_train_loader, pseudo_labels_list, coord_list, im
             points = coord_list[s][i]
             for c in range(n_clusters):
                 cci += 1
-                # Set the dot map for the cell-sub-cluster
+                # 生成当前“类别-子簇”对应的中心点图
                 gt_map_tmp = np.zeros((gt_dots_subclasses.shape[0],gt_dots_subclasses.shape[1]))
                 gt_map_tmp [(points[0][(pseudo_labels == c)], points[1][(pseudo_labels == c)])]=1
                 gt_dots_subclasses[:,:,cci] = gt_map_tmp
 
-                # Set the dilated dot map (mask) for the cell-sub-cluster.
+                # 生成当前“类别-子簇”对应的区域图（膨胀点图或细胞 mask）
                 gt_map_tmp = np.zeros((gt_dmap_subclasses.shape[0],gt_dmap_subclasses.shape[1]))
-                # Assign to each connected component the same label as the ground truth dot in that cell
+                # 将细胞中心点所在的整个连通域都赋给同一个子类，
+                # 从而保证一个细胞区域不会被拆到多个子类中
                 comp_in_cluster = label_comp[(points[0][(pseudo_labels == c)], points[1][(pseudo_labels == c)])]
                 for comp in comp_in_cluster:
                     gt_map_tmp[label_comp==comp] = 1
                 gt_dmap_subclasses[:,:,cci] = gt_map_tmp
-                # Save map as image. Useful for debugging.
+                # 同时保存可视化图像，便于调试伪标签生成是否合理
                 io.imsave(os.path.join(out_dir, img_name_list[i].replace('.png','_gt_dmap_s'+str(s)+'_c'+str(c)+'.png')), (gt_map_tmp*255).astype(np.uint8))
 
-        # Save generated ground truth maps for the current image
+        # 保存当前图像生成好的伪子类点图和区域图，供后续训练阶段直接读取
         gt_dots_subclasses.astype(np.uint8).dump(os.path.join(out_dir, img_name_list[i].replace('.png','_gt_dots.npy')))
         gt_dmap_subclasses.astype(np.uint8).dump(os.path.join(out_dir, img_name_list[i].replace('.png','.npy')))
         
 
 def perform_clustering(model, simple_train_loader, n_clusters, n_classes, feature_indx_list, out_dir, prev_centroids):
     '''
-        model: MCSpatNet model being trained
-        simple_train_loader: data loader for training data to iterate over input
-        n_clusters: number of clusters per class
-        n_classes: number of cell classes
-        feature_indx_list: features to use in clustering [ feature_code = {'decoder':0, 'cell-detect':1, 'class':2, 'subclass':3, 'k-cell':4} ]
-        out_dir: directory path to output generated pseudo ground truth
-        prev_centroids: previous epoch clustering centroids
+        model: 当前训练中的 MCSpatNet 模型。
+        simple_train_loader: 训练数据加载器，用于遍历输入图像并抽取特征。
+        n_clusters: 每个细胞类别内部要划分的聚类数。
+        n_classes: 细胞大类数量。
+        feature_indx_list: 聚类时使用的特征编号列表，
+                           feature_code = {'decoder':0, 'cell-detect':1, 'class':2, 'subclass':3, 'k-cell':4}。
+        out_dir: 输出生成伪标签文件的目录。
+        prev_centroids: 上一轮训练/聚类得到的聚类中心，可用于稳定当前轮初始化。
     '''
 
-    # Get the features to use for clustering
+    # 先按照任务类型收集聚类所需的细胞特征和坐标
     if(n_classes > 1):
         features_list, coord_list, img_name_list = collect_features_by_class(model, simple_train_loader, feature_indx_list, n_classes)
     else:
         features_list, coord_list, img_name_list = collect_features(model, simple_train_loader, feature_indx_list)
 
-    # Do the clustering: get the centroids for the new clusters and the pseudo ground truth labels
+    # 执行聚类，得到新的聚类中心以及每个细胞对应的伪子类标签
     pseudo_labels_list, centroids = cluster(features_list, coord_list, n_clusters, prev_centroids)
 
-    # Save the pseudo ground truth labels to the file system to be able to use in training
+    # 将伪标签落盘，供后续训练阶段作为监督信号读取
     create_pseudo_lbl_gt(simple_train_loader, pseudo_labels_list, coord_list, img_name_list, n_clusters, out_dir)
     return centroids
 

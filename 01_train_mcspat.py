@@ -18,13 +18,13 @@ from my_dataloader import CellsDataset as CellsDataset_simple
 from cluster_helper import *
 
 checkpoints_root_dir = './exp' # 所有训练输出的根目录。
-checkpoints_folder_name = 'exp1_consep' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+checkpoints_folder_name = 'exp2_brcam2c' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
 model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
 clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
-train_data_root = './data/CoNSeP_train'
-test_data_root = './data/CoNSeP_train'   # 这是验证集，不是测试集！
-train_split_filepath = './data_splits/consep/train_split.txt'
-test_split_filepath = './data_splits/consep/val_split.txt'
+train_data_root = './data/BRCA-M2C'
+test_data_root = './data/BRCA-M2C'   # 这是验证集，不是测试集！
+train_split_filepath = './data_splits/brca-m2c/train_split.txt'
+test_split_filepath = './data_splits/brca-m2c/val_split.txt'
 epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
 
 
@@ -173,6 +173,7 @@ if __name__=="__main__":
             continue;
         # 每个 epoch 开始前先做一次特征聚类，用于更新子类伪标签。
         print('epoch', epoch, 'start clustering')
+        # KEY：特性聚类
         centroids = perform_clustering(model, simple_train_loader, n_clusters, n_classes, [feature_code['k-cell'], feature_code['subclass']], train_dmap_subclasses_root, centroids)
         print('epoch', epoch, 'end clustering')
                 
@@ -182,7 +183,7 @@ if __name__=="__main__":
         log_file.flush()
 
         # 初始化当前 epoch 的累计损失统计变量。
-        epoch_loss=0
+        epoch_loss = 0
         train_count = 0
         # train_loss_k = 0
         # train_loss_dice = 0
@@ -222,7 +223,7 @@ if __name__=="__main__":
             gt_dmap_subclasses=gt_dmap_subclasses.to(device)
             gt_kmap=gt_kmap.to(device)
 
-            # 前向传播，模型会输出检测、分类、子类分类和 K function 回归四个分支。        
+            # KEY：前向传播，模型会输出检测、分类、子类分类和 K function 回归四个分支。        
             et_dmap_lst=model(img)
             et_dmap_all=et_dmap_lst[0][:,:,2:-2,2:-2] # 细胞检测分支的预测结果。
             et_dmap_class=et_dmap_lst[1][:,:,2:-2,2:-2] # 细胞分类分支的预测结果。

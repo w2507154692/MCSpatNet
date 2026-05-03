@@ -113,7 +113,7 @@ def eval(data_dir, out_dir):
     '''
 
     img_indx=-1
-    with open(os.path.join(out_dir, 'out_distance_scores.txt'), 'a+') as log_file:
+    with open(os.path.join(out_dir, 'out_distance_scores.txt'), 'w+') as log_file:
         for gt_filepath in gt_files:
             img_indx += 1
             print('gt_filepath',gt_filepath)
