@@ -8,6 +8,7 @@ import torch
 import torch.nn as nn
 import os
 import random
+import shutil
 from tqdm import tqdm as tqdm
 import sys;
 import math
@@ -40,6 +41,14 @@ feature_code = {'decoder':0, 'cell-detect':1, 'class':2, 'subclass':3, 'k-cell':
 seed = 42 # 固定随机种子，保证训练过程中的数据增强、参数初始化和采样顺序可复现
 
 
+def backup_python_files(experiment_dir):
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    code_backup_dir = os.path.join(experiment_dir, 'code')
+    os.makedirs(code_backup_dir, exist_ok=True)
+    for py_filepath in glob.glob(os.path.join(project_root, '*.py')):
+        shutil.copy2(py_filepath, os.path.join(code_backup_dir, os.path.basename(py_filepath)))
+
+
 if __name__=="__main__":
 
     # checkpoints_save_path：当前训练过程中各轮 checkpoint 的保存路径。
@@ -57,6 +66,9 @@ if __name__=="__main__":
 
     if not os.path.exists(cluster_tmp_out):
         os.mkdir(cluster_tmp_out)
+
+    # 训练开始前备份项目根目录下的 Python 源码，便于回溯当前实验配置和实现版本。
+    backup_python_files(checkpoints_save_path)
 
 
     # # log_file_path：训练日志文件的保存路径。
