@@ -13,15 +13,25 @@ import glob
 from model_arch import UnetVggMultihead
 from my_dataloader import CellsDataset
 
+# # 所有训练输出的根目录。
+# checkpoints_root_dir = './exp'
+# # 当前实验对应的子目录名称，最终模型权重会从 <checkpoints_root_dir>/<checkpoints_folder_name> 下读取。
+# checkpoints_folder_name = 'exp2_brcam2c'
+# eval_root_dir = './exp'
+# epoch=181 # 需要测试的 epoch。
+# visualize=True # 是否输出预测结果的可视化图像。
+# test_data_root = './data/BRCA-M2C'
+# test_split_filepath = './data_splits/brca-m2c/test_split.txt'
+# ----------------------------------------------------------------
 # 所有训练输出的根目录。
 checkpoints_root_dir = './exp'
 # 当前实验对应的子目录名称，最终模型权重会从 <checkpoints_root_dir>/<checkpoints_folder_name> 下读取。
-checkpoints_folder_name = 'exp2_brcam2c'
+checkpoints_folder_name = 'exp3_consep_class_det'
 eval_root_dir = './exp'
-epoch=181 # 需要测试的 epoch。
+epoch=265 # 需要测试的 epoch。
 visualize=True # 是否输出预测结果的可视化图像。
-test_data_root = './data/BRCA-M2C'
-test_split_filepath = './data_splits/brca-m2c/test_split.txt'
+test_data_root = './data/CoNSeP_test'
+test_split_filepath = None
 
 if __name__=="__main__":
 
@@ -271,7 +281,3 @@ if __name__=="__main__":
 
             # 主循环末尾释放大数组，减小长时间测试时的内存占用。
             del img,gt_dots
-
-
-
-

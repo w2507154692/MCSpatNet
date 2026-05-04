@@ -7,6 +7,7 @@ import time
 import torch
 import torch.nn as nn
 import os
+import random
 from tqdm import tqdm as tqdm
 import sys;
 import math
@@ -35,6 +36,8 @@ epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
 cell_code = {1:'lymphocyte', 2:'tumor', 3:'stromal'}
 
 feature_code = {'decoder':0, 'cell-detect':1, 'class':2, 'subclass':3, 'k-cell':4}
+
+seed = 42 # 固定随机种子，保证训练过程中的数据增强、参数初始化和采样顺序可复现
 
 
 if __name__=="__main__":
@@ -75,8 +78,16 @@ if __name__=="__main__":
     next_restart_epoch      = restart_epochs_freq + start_epoch
     gpu_or_cpu              = 'cuda' if torch.cuda.is_available() else 'cpu' # 自动选择设备，优先使用 CUDA，不可用时回退到 CPU。
     device=torch.device(gpu_or_cpu)
-    seed                    = time.time()
     # print_frequency         = 1  # 每个 epoch 的打印频率（当前未启用）。
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     # 初始化日志文件。
     log_file = open(log_file_path, 'a+')
@@ -127,8 +138,6 @@ if __name__=="__main__":
     lamda_subclasses = 1 # 子类/聚类分类输出头的 Dice 损失权重。
     lamda_k = 1 # K function 回归分支的 L1 损失权重。
 
-
-    torch.cuda.manual_seed(seed)
     model=UnetVggMultihead(kwargs={'dropout_prob':dropout_prob, 'initial_pad':initial_pad, 'interpolate':interpolate, 'conv_init':conv_init, 'n_classes':n_classes, 'n_channels':n_channels, 'n_heads':4, 'head_classes':[1,n_classes,n_classes2, r_classes_all]})
     if(not (model_param_path is None)):
         model.load_state_dict(torch.load(model_param_path), strict=False);
