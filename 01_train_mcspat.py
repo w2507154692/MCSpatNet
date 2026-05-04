@@ -108,7 +108,7 @@ if __name__=="__main__":
     n_classes2 = n_clusters * (n_classes) # 细胞子类/聚类分类头的输出通道数。
 
     lr  = 0.00005 # 学习率。
-    batch_size = 1
+    batch_size = 2
     prints_per_epoch=1 # 每个 epoch 保存/打印样例结果的频率控制参数。
 
     # 初始化 K function 的半径采样范围。每个类别都会在这些半径上计算空间统计特征。
