@@ -257,7 +257,8 @@ if __name__=="__main__":
             # 上面每个预测图都裁剪掉边界的2个像素，为了避免干扰？
 
             # K function 损失只在检测掩码区域上计算，避免背景区域干扰。
-            k_loss_mask = gt_dmap_all.clone()
+            # unsqueeze(1) 将 (B,H,W) 扩展为 (B,1,H,W)，使其能与 et_kmap (B,C,H,W) 正确广播
+            k_loss_mask = gt_dmap_all.clone().unsqueeze(1)
             loss_l1_k = criterion_l1_sum(et_kmap*(k_loss_mask), gt_kmap*(k_loss_mask)) / (k_loss_mask.sum()*r_classes_all)
 
             # 对检测分支应用 Sigmoid，对分类和子类分支应用 Softmax。
@@ -345,7 +346,8 @@ if __name__=="__main__":
             gt_dmap_all = gt_dmap_all.type(torch.FloatTensor)
             gt_kmap = gt_kmap.type(torch.FloatTensor)
             gt_kmap=gt_kmap.to(device)
-            k_loss_mask = gt_dmap_all.clone().to(device)      # K function 损失仅在膨胀点掩码区域上计算。
+            # unsqueeze(1) 将 (B,H,W) 扩展为 (B,1,H,W)，使其能与 et_kmap (B,C,H,W) 正确广播
+            k_loss_mask = gt_dmap_all.clone().to(device).unsqueeze(1)      # K function 损失仅在膨胀点掩码区域上计算。
 
             # 将真值图转为 numpy，便于后续基于连通域和点匹配的评估逻辑处理。
             gt_dots = gt_dots.detach().cpu().numpy()

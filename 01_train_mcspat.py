@@ -19,14 +19,24 @@ from my_dataloader_w_kfunc import CellsDataset
 from my_dataloader import CellsDataset as CellsDataset_simple
 from cluster_helper import *
 
+# checkpoints_root_dir = './exp' # 所有训练输出的根目录。
+# checkpoints_folder_name = 'exp2_brcam2c' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+# model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
+# clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
+# train_data_root = './data/BRCA-M2C'
+# test_data_root = './data/BRCA-M2C'   # 这是验证集，不是测试集！
+# train_split_filepath = './data_splits/brca-m2c/train_split.txt'
+# test_split_filepath = './data_splits/brca-m2c/val_split.txt'
+# epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
+# ------------------------------------------------------
 checkpoints_root_dir = './exp' # 所有训练输出的根目录。
-checkpoints_folder_name = 'exp2_brcam2c' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+checkpoints_folder_name = 'exp4_consep' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
 model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
 clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
-train_data_root = './data/BRCA-M2C'
-test_data_root = './data/BRCA-M2C'   # 这是验证集，不是测试集！
-train_split_filepath = './data_splits/brca-m2c/train_split.txt'
-test_split_filepath = './data_splits/brca-m2c/val_split.txt'
+train_data_root = './data/CoNSeP_train'
+test_data_root = './data/CoNSeP_train'   # 这是验证集，不是测试集！
+train_split_filepath = './data_splits/consep/train_split.txt'
+test_split_filepath = './data_splits/consep/val_split.txt'
 epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
 
 
@@ -131,7 +141,7 @@ if __name__=="__main__":
     n_classes2 = n_clusters * (n_classes) # 细胞子类/聚类分类头的输出通道数。
 
     lr  = 0.00005 # 学习率。
-    batch_size = 2
+    batch_size = 8
     prints_per_epoch=1 # 每个 epoch 保存/打印样例结果的频率控制参数。
 
     # 初始化 K function 的半径采样范围。每个类别都会在这些半径上计算空间统计特征。
@@ -253,7 +263,8 @@ if __name__=="__main__":
             # 上面每个预测图都裁剪掉边界的2个像素，为了避免干扰？
 
             # K function 损失只在检测掩码区域上计算，避免背景区域干扰。
-            k_loss_mask = gt_dmap_all.clone()
+            # unsqueeze(1) 将 (B,H,W) 扩展为 (B,1,H,W)，使其能与 et_kmap (B,C,H,W) 正确广播
+            k_loss_mask = gt_dmap_all.clone().unsqueeze(1)
             loss_l1_k = criterion_l1_sum(et_kmap*(k_loss_mask), gt_kmap*(k_loss_mask)) / (k_loss_mask.sum()*r_classes_all)
 
             # 对检测分支应用 Sigmoid，对分类和子类分支应用 Softmax。
@@ -339,7 +350,8 @@ if __name__=="__main__":
             gt_dmap_all = gt_dmap_all.type(torch.FloatTensor)
             gt_kmap = gt_kmap.type(torch.FloatTensor)
             gt_kmap=gt_kmap.to(device)
-            k_loss_mask = gt_dmap_all.clone().to(device)      # K function 损失仅在膨胀点掩码区域上计算。
+            # unsqueeze(1) 将 (B,H,W) 扩展为 (B,1,H,W)，使其能与 et_kmap (B,C,H,W) 正确广播
+            k_loss_mask = gt_dmap_all.clone().to(device).unsqueeze(1)      # K function 损失仅在膨胀点掩码区域上计算。
 
             # 将真值图转为 numpy，便于后续基于连通域和点匹配的评估逻辑处理。
             gt_dots = gt_dots.detach().cpu().numpy()
