@@ -16,8 +16,8 @@ class CellsDataset(Dataset):
         super(CellsDataset, self).__init__()
         '''
         img_root: 输入图像所在根目录。
-        gt_dmap_root: 真实膨胀点图所在根目录。
-        gt_dots_root: 真实中心点图所在根目录。
+        gt_dmap_root: 真实膨胀点图所在根目录。调试：gt_custom
+        gt_dots_root: 真实中心点图所在根目录。调试：gt_custom
         class_indx: 需要返回的真实标注通道索引，格式为逗号分隔字符串。
         split_filepath: 若不为 None，则只读取该文件中列出的图像。
         phase: 当前阶段，通常为 train 或 test。
@@ -26,6 +26,9 @@ class CellsDataset(Dataset):
         max_scale: 为使 patch 边长可被 max_scale 整除而补边。
         return_padding: 是否额外返回 max_scale 补边产生的上下左右 padding 大小。
         '''
+        # print("gt_dmap_root: ", gt_dmap_root)
+        # print("gt_dots_root: ", gt_dots_root)
+
         self.img_root=img_root
         self.gt_dmap_root=gt_dmap_root
         self.gt_dots_root=gt_dots_root
@@ -56,20 +59,20 @@ class CellsDataset(Dataset):
         # 读取图像并归一化到 [0,1]，同时确保输出为三通道 RGB 格式
         img_name=self.img_names[index]
         print('img_name',img_name)
-        img=io.imread(os.path.join(self.img_root,img_name))/255# convert from [0,255] to [0,1]
+        img=io.imread(os.path.join(self.img_root,img_name)) / 255   # convert from [0,255] to [0,1]
         if len(img.shape)==2: # 若原图是灰度图，则复制成三通道
             img=img[:,:,np.newaxis]
             img=np.concatenate((img,img,img),2)
 
-        # 读取真实膨胀点图；不存在时使用全 0 张量占位
-        gt_path = os.path.join(self.gt_dmap_root,img_name.replace('.png','.npy'));
+        # 读取真实膨胀点图；不存在时使用全 0 张量占位；[H, W, C]
+        gt_path = os.path.join(self.gt_dmap_root,img_name.replace('.png','.npy'))
         if(os.path.isfile(gt_path)):
             gt_dmap=np.load(gt_path, allow_pickle=True)[:,:,self.class_indx_list].squeeze()
         else:
             gt_dmap=np.zeros((img.shape[0], img.shape[1], len(self.class_indx_list)))
 
-        # 读取真实中心点图；不存在时使用全 0 张量占位
-        gt_dots_path = os.path.join(self.gt_dots_root,img_name.replace('.png','_gt_dots.npy'));
+        # 读取真实中心点图；不存在时使用全 0 张量占位；[H, W, C]，独热向量代表类别
+        gt_dots_path = os.path.join(self.gt_dots_root,img_name.replace('.png','_gt_dots.npy'))
         if(os.path.isfile(gt_dots_path)):
             gt_dots=np.load(gt_dots_path, allow_pickle=True)[:,:,self.class_indx_list].squeeze()
         else:
@@ -113,8 +116,8 @@ class CellsDataset(Dataset):
                 gt_dots = gt_dots[y:y+h2, x:x+w2]
 
         
-            # 训练阶段继续做随机裁剪：
-            # fixed_size < 0 时默认裁成原图四分之一大小，否则尽量裁成 fixed_size
+        # 训练阶段继续做随机裁剪：
+        # fixed_size < 0 时默认裁成原图四分之一大小，否则尽量裁成 fixed_size
         if self.phase=='train':
             i = -1
             img_pil = Image.fromarray(img.astype(np.uint8)*255);
@@ -127,29 +130,29 @@ class CellsDataset(Dataset):
                 gt_dmap = gt_dmap[i:i+h, j:j+w]
                 gt_dots = gt_dots[i:i+h, j:j+w]
 
-            # 初始化 padding 记录，默认不补边
+        # 初始化 padding 记录，默认不补边
         pad_y1=0
         pad_y2=0
         pad_x1=0
         pad_x2=0
-            # 如有需要，在四周补边，使图像尺寸可被 max_scale 整除，
-            # 便于与网络的下采样尺度对齐
-            if self.max_scale>1: # 这样下采样后的尺寸能和深度模型结构匹配
+        # 如有需要，在四周补边，使图像尺寸可被 max_scale 整除，
+        # 便于与网络的下采样尺度对齐
+        if self.max_scale>1: # 这样下采样后的尺寸能和深度模型结构匹配
             ds_rows=int(img.shape[0]//self.max_scale)*self.max_scale
             ds_cols=int(img.shape[1]//self.max_scale)*self.max_scale
             pad_y1 = 0
             pad_y2 = 0
             pad_x1 = 0
             pad_x2 = 0
-            if(ds_rows < img.shape[0]):
-                pad_y1 = (self.max_scale - (img.shape[0] - ds_rows))//2
-                pad_y2 = (self.max_scale - (img.shape[0] - ds_rows)) - pad_y1
-            if(ds_cols < img.shape[1]):
-                pad_x1 = (self.max_scale - (img.shape[1] - ds_cols))//2
-                pad_x2 = (self.max_scale - (img.shape[1] - ds_cols)) - pad_x1
-            img = np.pad(img, ((pad_y1,pad_y2),(pad_x1,pad_x2),(0,0)), 'constant', constant_values=(1,) )# 图像补边常数取决于背景颜色，这里使用 1
-            gt_dmap = np.pad(gt_dmap, ((pad_y1,pad_y2),(pad_x1,pad_x2),(0,0)), 'constant', constant_values=(0,) )# 监督图补边统一填 0，表示补出区域无目标
-            gt_dots = np.pad(gt_dots, ((pad_y1,pad_y2),(pad_x1,pad_x2),(0,0)), 'constant', constant_values=(0,) )# 监督图补边统一填 0，表示补出区域无目标
+        if(ds_rows < img.shape[0]):
+            pad_y1 = (self.max_scale - (img.shape[0] - ds_rows))//2
+            pad_y2 = (self.max_scale - (img.shape[0] - ds_rows)) - pad_y1
+        if(ds_cols < img.shape[1]):
+            pad_x1 = (self.max_scale - (img.shape[1] - ds_cols))//2
+            pad_x2 = (self.max_scale - (img.shape[1] - ds_cols)) - pad_x1
+        img = np.pad(img, ((pad_y1,pad_y2),(pad_x1,pad_x2),(0,0)), 'constant', constant_values=(1,) )   # 图像补边常数取决于背景颜色，这里使用 1
+        gt_dmap = np.pad(gt_dmap, ((pad_y1,pad_y2),(pad_x1,pad_x2),(0,0)), 'constant', constant_values=(0,) )   # 监督图补边统一填 0，表示补出区域无目标
+        gt_dots = np.pad(gt_dots, ((pad_y1,pad_y2),(pad_x1,pad_x2),(0,0)), 'constant', constant_values=(0,) )   # 监督图补边统一填 0，表示补出区域无目标
 
 
         # 将 numpy 数组转换成 PyTorch 使用的通道优先格式 (C, H, W)
@@ -167,7 +170,7 @@ class CellsDataset(Dataset):
         gt_dmap_tensor=torch.tensor(gt_dmap,dtype=torch.float)
         gt_dots_tensor=torch.tensor(gt_dots,dtype=torch.float)
 
-        if(self.return_padding):
+        if(self.return_padding):    # 默认打开
             # 返回 padding 信息，便于推理或后处理阶段去掉补边区域
             return img_tensor,gt_dmap_tensor,gt_dots_tensor,img_name, (pad_y1, pad_y2, pad_x1, pad_x2)
         else:

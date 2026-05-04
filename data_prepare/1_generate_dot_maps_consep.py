@@ -128,10 +128,14 @@ def gaussian_filter_density(img, points, point_class_map, out_filepath, start_y=
 
     #density_class.astype(np.float16).dump(out_filepath)
     #density.astype(np.float16).dump(os.path.splitext(out_filepath)[0] + '_all.npy')
-    (density_class > 0).astype(np.uint8).dump(out_filepath)     # 图像名.npy，保存的是每个类别的高斯密度图
+    # KEY：保存的是每个类别的高斯密度图（可以说是膨胀点图），名称如train_1.npy
+    (density_class > 0).astype(np.uint8).dump(out_filepath)
+    # KEY：保存的是所有类别总的高斯密度图，名称如train_1_all.npy
     (density > 0).astype(np.uint8).dump(os.path.splitext(out_filepath)[0] + '_all.npy')     # 图像名_all.npy，保存的是所有类别总的高斯密度图
     #io.imsave(out_filepath.replace('.npy', '.png'), (density / density.max() * 255).astype(np.uint8))
+    # KEY：保存所有类别总的高斯密度图，不过是png格式（供可视化），名称如train_1_binary.png
     io.imsave(out_filepath.replace('.npy', '_binary.png'), ((density > 0) * 255).astype(np.uint8))
+    # KEY：保存每个类别的高斯密度图，png格式，名称如train_1_s0_binary.png
     for s in range(1, density_class.shape[-1]):
         io.imsave(out_filepath.replace('.npy', '_s' + str(s) + '_binary.png'),
                   ((density_class[:, :, s] > 0) * 255).astype(np.uint8))
@@ -249,7 +253,7 @@ if __name__ == "__main__":
 
         # 通过对各类别点图求和，得到整体检测任务使用的点标注图。
         patch_label_arr_dots_all = patch_label_arr_dots[:, :, :].sum(axis=-1)   # [H, W]
-        # 保存分类点图和检测点图。
+        # KEY：保存分类点图和检测点图。
         patch_label_arr_dots.astype(np.uint8).dump(
             os.path.join(out_gt_dir, img_name + '_gt_dots.npy'))    # 每个像素位置一个类别独热向量
         patch_label_arr_dots_all.astype(np.uint8).dump(
@@ -263,6 +267,7 @@ if __name__ == "__main__":
             patch_label_arr = patch_label_arr_dots[:, :, dot_class].astype(int)
             patch_label_arr = ndimage.convolve(patch_label_arr, np.ones((5, 5)), mode='constant', cval=0.0)
             img2[np.where(patch_label_arr > 0)] = color_set[dot_class]
+        # KEY：保存彩色三类图
         io.imsave(os.path.join(out_gt_dir, img_name + '_img_with_dots.jpg'), img2)  # 彩色三类图
 
         # 生成高斯图/二值掩码图。

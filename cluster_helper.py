@@ -86,24 +86,29 @@ def collect_features_by_class(model, simple_train_loader, feature_indx_list, n_c
 
             # 分类别收集细胞中心坐标以及这些中心点对应的特征向量
             for s in range(gt_dots.shape[0]):
-                points = np.where(gt_dots[s] > 0)
-                coord_list[s][i] = points
+                points = np.where(gt_dots[s] > 0)   # 返回一个二元组([x1,x2,x3], [y1,y2,y3])
+                coord_list[s][i] = points   # 存储坐标，[n_class, n_data]
                 if(len(points[0])==0):
                     # 当前图像中该类别没有细胞，后续聚类时直接跳过
                     features_list[s][i] = None
                     continue
-                img_feat_s = img_feat[points]
-                features_list[s][i] = img_feat_s
+                img_feat_s = img_feat[points]   # 从特征图中提取坐标为points的特征
+                features_list[s][i] = img_feat_s    # 加入到s类别，[n_class, n_data]
 
             del et_dmap_lst            
  
     return features_list, coord_list, img_name_list
     
 def cluster(features_list, coord_list, n_clusters, prev_centroids):
+    '''
+        features_list: [n_class, n_data]，记录某个类别某张图上的特征
+        coord_list: [n_class, n_data]，记录某张图上满足该类别的若干细胞坐标
+    '''
+    
     # 对每个类别分别汇总所有细胞特征，执行 KMeans 聚类，
     # 再用训练好的聚类器为每个细胞生成伪子类标签
     cluster_centers_all = None
-    pseudo_labels_list = [[0]*len(features_list[0]) for i in range(len(features_list))]
+    pseudo_labels_list = [[0]*len(features_list[0]) for i in range(len(features_list))]     # 伪标签列表，[n_class, n_data]
     for s in range(len(features_list)):
         features = None
         # 拼接当前类别下所有图像中的细胞特征，形成一个总的聚类输入矩阵
@@ -131,6 +136,8 @@ def cluster(features_list, coord_list, n_clusters, prev_centroids):
             cluster_centers_all = kmeans.cluster_centers_
         else:
             cluster_centers_all = np.concatenate((cluster_centers_all, kmeans.cluster_centers_), axis=0)
+    print(cluster_centers_all.shape)    # [15, 128]
+    # cluster_centers_all: [n_class*n_subclass, feature_dim?]
 
     # 返回每个细胞的伪子类标签，以及所有类别的聚类中心
     return pseudo_labels_list, cluster_centers_all
@@ -216,6 +223,8 @@ def perform_clustering(model, simple_train_loader, n_clusters, n_classes, featur
 
     # 执行聚类，得到新的聚类中心以及每个细胞对应的伪子类标签
     pseudo_labels_list, centroids = cluster(features_list, coord_list, n_clusters, prev_centroids)
+    # pseudo_labels_list: [n_class, n_data]，存储某个类别某个图像，用K-mean算法预测的子类
+    # prev_centroids: [n_class]
 
     # 将伪标签落盘，供后续训练阶段作为监督信号读取
     create_pseudo_lbl_gt(simple_train_loader, pseudo_labels_list, coord_list, img_name_list, n_clusters, out_dir)

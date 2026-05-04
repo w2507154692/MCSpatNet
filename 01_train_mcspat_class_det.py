@@ -1,3 +1,7 @@
+'''
+    ablation：仅保留检测和分类模块
+'''
+
 import numpy as np
 import time
 import torch
@@ -18,13 +22,13 @@ from my_dataloader import CellsDataset as CellsDataset_simple
 from cluster_helper import *
 
 checkpoints_root_dir = './exp' # 所有训练输出的根目录。
-checkpoints_folder_name = 'exp2_brcam2c' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+checkpoints_folder_name = 'exp3_consep_class_det' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
 model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
 clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
-train_data_root = './data/BRCA-M2C'
-test_data_root = './data/BRCA-M2C'   # 这是验证集，不是测试集！
-train_split_filepath = './data_splits/brca-m2c/train_split.txt'
-test_split_filepath = './data_splits/brca-m2c/val_split.txt'
+train_data_root = './data/CoNSeP_train'
+test_data_root = './data/CoNSeP_train'   # 这是验证集，不是测试集！
+train_split_filepath = './data_splits/consep/train_split.txt'
+test_split_filepath = './data_splits/consep/val_split.txt'
 epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
 
 
@@ -249,20 +253,22 @@ if __name__=="__main__":
             union = (et_all_sig**2).sum() + (gt_dmap_all.unsqueeze(0)**2).sum()
             loss_dice_all =  1 - ((2 * intersection + 1) / (union + 1))
 
-            intersection = (et_subclasses_sig * gt_dmap_subclasses ).sum()
-            union = (et_subclasses_sig**2).sum() + (gt_dmap_subclasses**2).sum()
-            loss_dice_subclass =  1 - ((2 * intersection + 1) / (union + 1))
+            # intersection = (et_subclasses_sig * gt_dmap_subclasses ).sum()
+            # union = (et_subclasses_sig**2).sum() + (gt_dmap_subclasses**2).sum()
+            # loss_dice_subclass =  1 - ((2 * intersection + 1) / (union + 1))
 
-            loss_dice = loss_dice_class + loss_dice_all + lamda_subclasses * loss_dice_subclass
+            # loss_dice = loss_dice_class + loss_dice_all + lamda_subclasses * loss_dice_subclass
+            loss_dice = loss_dice_class + loss_dice_all
             # train_loss_dice += loss_dice.item()
 
-            # 将 Dice loss 与 K function 的 L1 loss 相加。
-            # 在训练初期 K function 分支可能产生 NaN，因此仅在其有效时才加入总损失。
-            loss = (lamda_dice * loss_dice )
-            if(not math.isnan(loss_l1_k.item())):
-                loss += loss_l1_k * lamda_k
-                # train_count_k += 1
-                # train_loss_k += loss_l1_k.item()
+            # # 将 Dice loss 与 K function 的 L1 loss 相加。
+            # # 在训练初期 K function 分支可能产生 NaN，因此仅在其有效时才加入总损失。
+            # loss = (lamda_dice * loss_dice )
+            # if(not math.isnan(loss_l1_k.item())):
+            #     loss += loss_l1_k * lamda_k
+            #     # train_count_k += 1
+            #     # train_loss_k += loss_l1_k.item()
+            loss = loss_dice
 
             # 反向传播并更新参数。
             epoch_loss += loss.item()

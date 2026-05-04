@@ -16,12 +16,12 @@ from my_dataloader import CellsDataset
 # 所有训练输出的根目录。
 checkpoints_root_dir = './exp'
 # 当前实验对应的子目录名称，最终模型权重会从 <checkpoints_root_dir>/<checkpoints_folder_name> 下读取。
-checkpoints_folder_name = 'exp1_consep'
+checkpoints_folder_name = 'exp2_brcam2c'
 eval_root_dir = './exp'
-epoch=293 # 需要测试的 epoch。
+epoch=181 # 需要测试的 epoch。
 visualize=True # 是否输出预测结果的可视化图像。
-test_data_root = './data/CoNSeP_test'
-test_split_filepath = None
+test_data_root = './data/BRCA-M2C'
+test_split_filepath = './data_splits/brca-m2c/test_split.txt'
 
 if __name__=="__main__":
 

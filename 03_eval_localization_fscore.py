@@ -9,7 +9,7 @@ from scipy import ndimage
 
 # 配置参数
 # data_dir 目录中同时包含真实标注和预测结果，默认已经先运行过 02_test_vis_mcspat.py 生成预测文件
-data_dir = './exp/exp1_consep_e293/'
+data_dir = './exp/exp2_brcam2c_e181/'
 
 max_dist_thresh = 6 # 在 1 到 max_dist_thresh 的像素距离阈值范围内计算 F-score；40x 下 mpp=0.254，20x 下 mpp=0.508，因此 6 px 约等于 3.048 微米，30 px 约等于 15.24 微米
 color_set = {'tp':(0,162,232),'fp':(0,255,0),'fn':(255,255,0)} 
