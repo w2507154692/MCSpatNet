@@ -23,8 +23,18 @@ from my_dataloader_w_kfunc import CellsDataset
 from my_dataloader import CellsDataset as CellsDataset_simple
 from cluster_helper import *
 
+# checkpoints_root_dir = './exp' # 所有训练输出的根目录。
+# checkpoints_folder_name = 'exp2_brcam2c' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+# model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
+# clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
+# train_data_root = './data/BRCA-M2C'
+# test_data_root = './data/BRCA-M2C'   # 这是验证集，不是测试集！
+# train_split_filepath = './data_splits/brca-m2c/train_split.txt'
+# test_split_filepath = './data_splits/brca-m2c/val_split.txt'
+# epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
+# ------------------------------------------------------
 checkpoints_root_dir = './exp' # 所有训练输出的根目录。
-checkpoints_folder_name = 'exp3_consep_class_det' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+checkpoints_folder_name = 'exp5_consep' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
 model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
 clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
 train_data_root = './data/CoNSeP_train'
@@ -271,8 +281,8 @@ if __name__=="__main__":
             union = (et_class_sig**2).sum() + (gt_dmap**2).sum()
             loss_dice_class =  1 - ((2 * intersection + 1) / (union + 1))
 
-            intersection = (et_all_sig * gt_dmap_all.unsqueeze(0) ).sum()
-            union = (et_all_sig**2).sum() + (gt_dmap_all.unsqueeze(0)**2).sum()
+            intersection = (et_all_sig * gt_dmap_all.unsqueeze(1) ).sum()
+            union = (et_all_sig**2).sum() + (gt_dmap_all.unsqueeze(1)**2).sum()
             loss_dice_all =  1 - ((2 * intersection + 1) / (union + 1))
 
             # intersection = (et_subclasses_sig * gt_dmap_subclasses ).sum()

@@ -30,7 +30,7 @@ from cluster_helper import *
 # epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
 # ------------------------------------------------------
 checkpoints_root_dir = './exp' # 所有训练输出的根目录。
-checkpoints_folder_name = 'exp4_consep' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+checkpoints_folder_name = 'exp5_consep' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
 model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
 clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
 train_data_root = './data/CoNSeP_train'
@@ -277,8 +277,8 @@ if __name__=="__main__":
             union = (et_class_sig**2).sum() + (gt_dmap**2).sum()
             loss_dice_class =  1 - ((2 * intersection + 1) / (union + 1))
 
-            intersection = (et_all_sig * gt_dmap_all.unsqueeze(0) ).sum()
-            union = (et_all_sig**2).sum() + (gt_dmap_all.unsqueeze(0)**2).sum()
+            intersection = (et_all_sig * gt_dmap_all.unsqueeze(1) ).sum()
+            union = (et_all_sig**2).sum() + (gt_dmap_all.unsqueeze(1)**2).sum()
             loss_dice_all =  1 - ((2 * intersection + 1) / (union + 1))
 
             intersection = (et_subclasses_sig * gt_dmap_subclasses ).sum()
@@ -313,6 +313,7 @@ if __name__=="__main__":
 
         #break
 
+        # KEY：验证
         # 在验证集上进行测试/评估。
         model.eval()
         err=np.array([0 for s in range(n_classes_out)])
