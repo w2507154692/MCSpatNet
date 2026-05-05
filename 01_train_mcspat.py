@@ -19,27 +19,29 @@ from my_dataloader_w_kfunc import CellsDataset
 from my_dataloader import CellsDataset as CellsDataset_simple
 from cluster_helper import *
 
-# checkpoints_root_dir = './exp' # 所有训练输出的根目录。
-# checkpoints_folder_name = 'exp2_brcam2c' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
-# model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
-# clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
-# train_data_root = './data/BRCA-M2C'
-# test_data_root = './data/BRCA-M2C'   # 这是验证集，不是测试集！
-# train_split_filepath = './data_splits/brca-m2c/train_split.txt'
-# test_split_filepath = './data_splits/brca-m2c/val_split.txt'
-# epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
-# ------------------------------------------------------
 checkpoints_root_dir = './exp' # 所有训练输出的根目录。
-checkpoints_folder_name = 'exp6_consep_class_det' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+checkpoints_folder_name = 'exp7_brcam2c' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
 model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
 clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
-train_data_root = './data/CoNSeP_train'
-test_data_root = './data/CoNSeP_train'   # 这是验证集，不是测试集！
-train_split_filepath = './data_splits/consep/train_split.txt'
-test_split_filepath = './data_splits/consep/val_split.txt'
-epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
-use_k_function_loss = False
-use_subclass_loss = False
+train_data_root = './data/BRCA-M2C'
+test_data_root = './data/BRCA-M2C'   # 这是验证集，不是测试集！
+train_split_filepath = './data_splits/brca-m2c/train_split.txt'
+test_split_filepath = './data_splits/brca-m2c/val_split.txt'
+epochs  = 450 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
+# ------------------------------------------------------
+# checkpoints_root_dir = './exp' # 所有训练输出的根目录。
+# checkpoints_folder_name = 'exp6_consep_class_det' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+# model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
+# clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
+# train_data_root = './data/CoNSeP_train'
+# test_data_root = './data/CoNSeP_train'   # 这是验证集，不是测试集！
+# train_split_filepath = './data_splits/consep/train_split.txt'
+# test_split_filepath = './data_splits/consep/val_split.txt'
+# epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
+
+
+use_k_function_loss = True
+use_subclass_loss = True
 
 
 cell_code = {1:'lymphocyte', 2:'tumor', 3:'stromal'}
@@ -94,6 +96,7 @@ if __name__=="__main__":
     start_epoch             = 0  # 如果从 model_param_path 加载历史模型继续训练，可在这里指定起始轮次。
     epoch_start_eval_prec   = 1 # 从该轮开始，在验证集上评估预测结果的 F-score。
     restart_epochs_freq     = 50 # 优化器的重置周期，用于避免 Adam 学习率状态逐渐失效。
+    # 正是由于优化器重置才导致训练时loss曲线每50个epoch突然陡然上升，然后逐渐下降
     # PROBLEM: 优化器重置是啥
     next_restart_epoch      = restart_epochs_freq + start_epoch
     gpu_or_cpu              = 'cuda' if torch.cuda.is_available() else 'cpu' # 自动选择设备，优先使用 CUDA，不可用时回退到 CPU。
@@ -186,7 +189,8 @@ if __name__=="__main__":
     # 初始化聚类阶段使用的训练集 DataLoader。
     # 该加载器不做随机打乱，用于在每个 epoch 开始前抽取特征并生成新的伪子类标签。
     simple_train_dataset=CellsDataset_simple(train_image_root,train_dmap_root,train_dots_root,class_indx, phase='test', fixed_size=-1, max_scale=16, return_padding=True)
-    simple_train_loader=torch.utils.data.DataLoader(simple_train_dataset,batch_size=batch_size,shuffle=False)
+    # 聚类阶段样本尺寸可能不一致，固定为 batch_size=1 避免默认 collate 的 stack 报错。
+    simple_train_loader=torch.utils.data.DataLoader(simple_train_dataset,batch_size=1,shuffle=False)
 
 
     # 根据 prints_per_epoch 计算验证阶段的样例结果保存频率。
