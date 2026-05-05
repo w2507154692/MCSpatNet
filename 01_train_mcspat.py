@@ -30,7 +30,7 @@ from cluster_helper import *
 # epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
 # ------------------------------------------------------
 checkpoints_root_dir = './exp' # 所有训练输出的根目录。
-checkpoints_folder_name = 'exp5_consep' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+checkpoints_folder_name = 'exp6_consep_class_det' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
 model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
 clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
 train_data_root = './data/CoNSeP_train'
@@ -311,8 +311,25 @@ if __name__=="__main__":
             loss.backward()
             optimizer.step()
 
+            # 按当前训练配置自适应记录可用损失项，避免引用未定义变量。
+            log_items = [
+                f"epoch: {epoch}",
+                f"i: {i}",
+                f"loss_total: {loss.item()}",
+                f"loss_dice_class: {loss_dice_class.item()}",
+                f"loss_dice_all: {loss_dice_all.item()}"
+            ]
+            if use_subclass_loss:
+                log_items.append(f"loss_dice_subclass: {loss_dice_subclass.item()}")
 
-            log_file.write("epoch: "+str(epoch)+ "  i: "+str(i)+"   loss_dice: "+str(loss_dice.item()) + "   loss_l1_k:" + str(loss_l1_k.item()) + '\n')
+            loss_l1_k_val = loss_l1_k.item()
+            if use_k_function_loss:
+                if math.isnan(loss_l1_k_val):
+                    log_items.append("loss_l1_k: nan(skipped)")
+                else:
+                    log_items.append(f"loss_l1_k: {loss_l1_k_val}")
+
+            log_file.write("   ".join(log_items) + '\n')
             log_file.flush()
 
 
