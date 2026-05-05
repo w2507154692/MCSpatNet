@@ -38,6 +38,8 @@ test_data_root = './data/CoNSeP_train'   # 这是验证集，不是测试集！
 train_split_filepath = './data_splits/consep/train_split.txt'
 test_split_filepath = './data_splits/consep/val_split.txt'
 epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
+use_k_function_loss = False
+use_subclass_loss = False
 
 
 cell_code = {1:'lymphocyte', 2:'tumor', 3:'stromal'}
@@ -285,16 +287,23 @@ if __name__=="__main__":
             union = (et_subclasses_sig**2).sum() + (gt_dmap_subclasses**2).sum()
             loss_dice_subclass =  1 - ((2 * intersection + 1) / (union + 1))
 
-            loss_dice = loss_dice_class + loss_dice_all + lamda_subclasses * loss_dice_subclass
-            # train_loss_dice += loss_dice.item()
-
-            # 将 Dice loss 与 K function 的 L1 loss 相加。
-            # 在训练初期 K function 分支可能产生 NaN，因此仅在其有效时才加入总损失。
-            loss = (lamda_dice * loss_dice )
-            if(not math.isnan(loss_l1_k.item())):
-                loss += loss_l1_k * lamda_k
-                # train_count_k += 1
-                # train_loss_k += loss_l1_k.item()
+            # KEY：汇总loss
+            if use_k_function_loss and use_subclass_loss:
+                loss = lamda_dice * (loss_dice_class + loss_dice_all + lamda_subclasses * loss_dice_subclass)
+                if(not math.isnan(loss_l1_k.item())):
+                    loss += loss_l1_k * lamda_k
+                    # train_count_k += 1
+                    # train_loss_k += loss_l1_k.item()
+            elif use_k_function_loss:
+                loss = lamda_dice * (loss_dice_class + loss_dice_all)
+                if(not math.isnan(loss_l1_k.item())):
+                    loss += loss_l1_k * lamda_k
+                    # train_count_k += 1
+                    # train_loss_k += loss_l1_k.item()
+            elif use_subclass_loss:
+                raise Exception("Subclass must be with K-Function!")
+            else:
+                loss = loss_dice_class + loss_dice_all
 
             # 反向传播并更新参数。
             epoch_loss += loss.item()
