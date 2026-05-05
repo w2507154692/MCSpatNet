@@ -569,6 +569,9 @@ if __name__=="__main__":
             print('epoch', epoch, 'saving')
             new_epoch_filepath = os.path.join(checkpoints_save_path, 'mcspat_epoch_'+str(epoch)+model_save_postfix+".pth")
             torch.save(model.state_dict(), new_epoch_filepath ) # 仅在验证指标改善时保存模型。
+            # 仅保留当前最优权重，删除上一个最优权重文件以节省磁盘空间。
+            if (best_epoch_filepath is not None) and (best_epoch_filepath != new_epoch_filepath) and os.path.exists(best_epoch_filepath):
+                os.remove(best_epoch_filepath)
             centroids.dump(os.path.join(checkpoints_save_path, 'epoch{}_centroids.npy'.format(epoch)))
             saved = True
             print_msg = f'epoch {epoch} saved.'
