@@ -180,6 +180,7 @@ if __name__=="__main__":
 
     # 初始化训练集 DataLoader。
     train_dataset=CellsDataset(train_image_root,train_dmap_root,train_dots_root,class_indx,train_dmap_subclasses_root, train_dots_subclasses_root, train_kmap_root, split_filepath=train_split_filepath, phase='train', fixed_size=448, max_scale=16)
+    # 这里的fixed_size>0时返回对应尺寸的随机裁剪块 
     train_loader=torch.utils.data.DataLoader(train_dataset,batch_size=batch_size,shuffle=True)
 
     # 初始化验证集 DataLoader。
@@ -189,7 +190,8 @@ if __name__=="__main__":
     # 初始化聚类阶段使用的训练集 DataLoader。
     # 该加载器不做随机打乱，用于在每个 epoch 开始前抽取特征并生成新的伪子类标签。
     simple_train_dataset=CellsDataset_simple(train_image_root,train_dmap_root,train_dots_root,class_indx, phase='test', fixed_size=-1, max_scale=16, return_padding=True)
-    # 聚类阶段样本尺寸可能不一致，固定为 batch_size=1 避免默认 collate 的 stack 报错。
+    # 这里设置fixed_size>0，导致同一batch内图像尺寸有可能不一致
+    # 固定为 batch_size=1 避免默认 collate 的 stack 报错。
     simple_train_loader=torch.utils.data.DataLoader(simple_train_dataset,batch_size=1,shuffle=False)
 
 
@@ -231,7 +233,7 @@ if __name__=="__main__":
             ''' 
                 img：输入图像。
                 gt_dmap：细胞类别（lymphocytes、epithelial/tumor、stromal）的真值图，使用膨胀后的点标注表示。
-                         它可以是二值掩码，也可以是密度图；若为密度图，后续会转换成二值掩码。它标记一块连续的区域
+                         它可以是二值掩码（本实验都是二值膨胀掩码），也可以是密度图；若为密度图，后续会转换成二值掩码。它标记一块连续的区域
                 gt_dots：细胞类别对应的真值二值点图。它标记细胞的中心，一个细胞只有一个掩码
                 gt_dmap_subclasses：细胞聚类子类的真值图，同样使用膨胀后的点表示。
                                     它可以是二值掩码，也可以是密度图；若为密度图，后续会转换成二值掩码。
@@ -244,8 +246,7 @@ if __name__=="__main__":
             train_count += 1
 
             img=img.to(device)
-            # 将真值图转换为二值掩码，兼容输入为密度图的情况。
-            gt_dmap = gt_dmap > 0   # 密度图大于0就视为有细胞在该位置，会不会不精确？
+            gt_dmap = gt_dmap > 0   # 将真值图转换为二值掩码，兼容输入为密度图的情况。
             gt_dmap_subclasses = gt_dmap_subclasses > 0
             # 由分类真值图合并得到检测真值图。
             gt_dmap_all =  gt_dmap.max(1)[0]    # 按通道维取最大值，返回一个二元组（最大值，最大值的索引）。这里相当于看一下是否每个类别都为0，只要有一个类别不为0，那么就存在细胞，掩码为1
@@ -433,15 +434,19 @@ if __name__=="__main__":
 
             print('epoch', epoch, 'test', i, 'loss_l1_k', str(loss_l1_k.item()), 'loss_dice', str(loss_dice))
 
-            # 从指定轮次开始，基于点匹配统计 TP/FP/FN，并计算 F-score。
+            # KEY：从指定轮次开始，基于点匹配统计 TP/FP/FN，并计算 F-score。
+            '''
+                检测：对检测结果做sigmoid后二值化，得到检测图（连通域），看每个连通域是否和真实的细胞中心点相交，如果相交则记为TP，然后删除该真实中心点（避免一个真实点重复匹配多个预测结果）。如果该预测连通域没有匹配任何真实点，则记为FP。如果某个真实点没有被任何预测结果所匹配，则记为FN。
+                分类：对分类结果做softmax后argmax得到类别编号，然后转换为某个类别通道的二值掩码（连通域）。为了将分类的连通域转换成单个点，首先先把检测结果的连通域寻找中心点，然后将该中心点与分类掩码相乘，得到最终的分类掩码（单点），与真实掩码计算相关指标。
+            '''
             if(epoch >= epoch_start_eval_prec):
                 # 对检测输出施加 0.5 阈值，并转成二值掩码。
-                e_hard = filters.apply_hysteresis_threshold(et_all_sig.squeeze(), 0.5, 0.5)            
-                e_hard2 = (e_hard > 0).astype(np.uint8)
+                e_hard = filters.apply_hysteresis_threshold(et_all_sig.squeeze(), 0.5, 0.5)      
+                e_hard2 = (e_hard > 0).astype(np.uint8)     # [H, W]
                 e_hard2_all = e_hard2.copy() 
 
                 # 在二值检测图上寻找轮廓，并用轮廓中心作为预测细胞中心点。
-                e_dot = np.zeros((img.shape[-2], img.shape[-1]))
+                e_dot = np.zeros((img.shape[-2], img.shape[-1]))    # [H, W]，用预测的检测掩码寻找连通域中心
                 contours, hierarchy = cv2.findContours(e_hard2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
                 for idx in range(len(contours)):
                     contour_i = contours[idx]
@@ -487,23 +492,23 @@ if __name__=="__main__":
                 fn_count_all[-1] = fn_count_all[-1] + fn_count
 
                 # 取分类分支的 argmax 作为每个像素的预测细胞类别。
-                et_class_argmax = et_class_sig.squeeze().argmax(axis=0)
+                et_class_argmax = et_class_sig.squeeze().argmax(axis=0)     # [H, W]，每个位置记录类别编号
                 e_hard2_all = e_hard2.copy()
                 # 对每个细胞类别分别统计 TP、FP、FN，逻辑与检测分支类似。
                 for s in range(n_classes):
-                    g_count = gt_dots[0,s,:,:].sum()
+                    g_count = gt_dots[0,s,:,:].sum()    # 统计类别s的细胞数量
 
-                    e_hard2 = (et_class_argmax == s)  
+                    e_hard2 = (et_class_argmax == s)    # 记录哪些位置和真实类别一致
                 
-                    e_dot = e_hard2 * e_dot_all  
+                    e_dot = e_hard2 * e_dot_all     # 和预测的检测图相乘，避免出现某个位置有分类结果而没有检测结果
 
-                    g_dot = gt_dots[0,s,:,:].squeeze()
+                    g_dot = gt_dots[0,s,:,:].squeeze()  # [H, W]，每个位置取0/1，表示类别s的二值点图
 
                     tp_count = 0
                     fp_count = 0
                     fn_count = 0
-                    g_dot_vis = g_dot.copy()
-                    e_dots_tuple = np.where(e_dot > 0)
+                    g_dot_vis = g_dot.copy()    # [H, W]，类别s的真实二值点图（细胞中心）
+                    e_dots_tuple = np.where(e_dot > 0)  # [H, W]，类别s的预测二值点图（连通域中心）
                     for idx in range(len(e_dots_tuple[0])):
                         cy=e_dots_tuple[0][idx]
                         cx=e_dots_tuple[1][idx]

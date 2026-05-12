@@ -59,7 +59,7 @@ def gaussian_filter_density(img, points, point_class_map, out_filepath, start_y=
         根据细胞中心点生成高斯密度图/二值掩码图。
 
         img：原始图像的缩放图
-        points：[N, 1, 1]，存储每个细胞像素的坐标（已被扩张）
+        points：[N, 2]，存储每个细胞像素的坐标
         point_class_map：[H, W, C]，存储每个像素的类别
         out_filepath：输出路径，图像名.npy
 
@@ -128,14 +128,14 @@ def gaussian_filter_density(img, points, point_class_map, out_filepath, start_y=
 
     #density_class.astype(np.float16).dump(out_filepath)
     #density.astype(np.float16).dump(os.path.splitext(out_filepath)[0] + '_all.npy')
-    # KEY：保存的是每个类别的高斯密度图（可以说是膨胀点图），名称如train_1.npy
+    # KEY：保存的是每个类别的高斯密度图（二值化）（可以说是膨胀点图），名称如train_1.npy
     (density_class > 0).astype(np.uint8).dump(out_filepath)
-    # KEY：保存的是所有类别总的高斯密度图，名称如train_1_all.npy
+    # KEY：保存的是所有类别总的高斯密度图（二值化），名称如train_1_all.npy
     (density > 0).astype(np.uint8).dump(os.path.splitext(out_filepath)[0] + '_all.npy')     # 图像名_all.npy，保存的是所有类别总的高斯密度图
     #io.imsave(out_filepath.replace('.npy', '.png'), (density / density.max() * 255).astype(np.uint8))
-    # KEY：保存所有类别总的高斯密度图，不过是png格式（供可视化），名称如train_1_binary.png
+    # KEY：保存所有类别总的高斯密度图（二值化），不过是png格式（供可视化），名称如train_1_binary.png
     io.imsave(out_filepath.replace('.npy', '_binary.png'), ((density > 0) * 255).astype(np.uint8))
-    # KEY：保存每个类别的高斯密度图，png格式，名称如train_1_s0_binary.png
+    # KEY：保存每个类别的高斯密度图（二值化），png格式，名称如train_1_s0_binary.png
     for s in range(1, density_class.shape[-1]):
         io.imsave(out_filepath.replace('.npy', '_s' + str(s) + '_binary.png'),
                   ((density_class[:, :, s] > 0) * 255).astype(np.uint8))
@@ -226,14 +226,14 @@ if __name__ == "__main__":
 
         # 将原始类别按照 class_group_mapping_dict 合并为三大类。
         # 同时构建可视化时使用的彩色覆盖图 img3。
-        patch_label_arr_dots_grouped = np.zeros((img2.shape[0], img2.shape[1], n_grouped_class_channels), dtype=np.uint8)
+        patch_label_arr_dots_grouped = np.zeros((img2.shape[0], img2.shape[1], n_grouped_class_channels), dtype=np.uint8)   # [H, W, C]
         for class_id, map_class_lst in class_group_mapping_dict.items():
             patch_label_arr = patch_label_arr_dots[:, :, map_class_lst].sum(axis=-1)
             # 用卷积把点适度扩张，便于在可视化图中更清楚地看到标注位置。
             patch_label_arr = ndimage.convolve(patch_label_arr, np.ones((9, 9)), mode='constant', cval=0.0)
             img3[np.where(patch_label_arr > 0)] = color_set[class_id]
             patch_label_arr_dots_grouped[:, :, class_id] = patch_label_arr_dots[:, :, map_class_lst].sum(axis=-1)
-        patch_label_arr_dots = patch_label_arr_dots_grouped     # [H, W, C] 
+        patch_label_arr_dots = patch_label_arr_dots_grouped     # [H, W, C]
 
         # 可选步骤：移除局部邻域内的重复点标注。
         # 适用于同一细胞被重复点击标注、导致局部多个相邻点同时存在的情况。
@@ -273,7 +273,7 @@ if __name__ == "__main__":
         # 生成高斯图/二值掩码图。
         # 这里不能按类别分别独立生成后再简单相加，否则可能导致检测图中不同类别区域互相重叠不一致。
         mat_s_points = np.where(patch_label_arr_dots > 0)   # 二值掩码
-        points = np.zeros((len(mat_s_points[0]), 2))    # points: [N, 1，1]，存储每个细胞像素的坐标（Y，X），它和之前的centroid不同，它是扩张后的
+        points = np.zeros((len(mat_s_points[0]), 2))    # points: [N, 2]，存储每个细胞像素的坐标（Y，X）
         print(points.shape)
         points[:, 0] = mat_s_points[1]
         points[:, 1] = mat_s_points[0]

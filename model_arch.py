@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
 import collections
-from distutils.util import strtobool;
+# from distutils.util import strtobool;
 import numpy as np  
 
 from sa_net_arch_utilities_pytorch import CNNArchUtilsPyTorch;
@@ -13,7 +13,7 @@ class UnetVggMultihead(nn.Module):
     def __init__(self, load_weights=False, kwargs=None):
         super(UnetVggMultihead,self).__init__()
 
-        # predefined list of arguments
+        # 预定义参数列表；若外部通过 kwargs 传入同名参数，则会覆盖这里的默认值
         args = {'conv_init': 'he', 'block_size':3, 'pool_size':2
             , 'dropout_prob' : 0, 'initial_pad':0, 'n_classes':1, 'n_channels':3, 'n_heads':2, 'head_classes':[1,1]
  
@@ -22,9 +22,9 @@ class UnetVggMultihead(nn.Module):
         if(not(kwargs is None)):
             args.update(kwargs);
 
-        # 'conv_init': 'uniform', 'normal', 'xavier_uniform', 'xavier_normal', 'he'
+        # conv_init 可选初始化方式：'uniform', 'normal', 'xavier_uniform', 'xavier_normal', 'he'
 
-        # read extra argument
+        # 读取并保存外部传入的结构参数
         self.n_channels = int(args['n_channels']);
         self.n_classes = int(args['n_classes']);
         self.conv_init = str(args['conv_init']).lower();
@@ -38,7 +38,7 @@ class UnetVggMultihead(nn.Module):
 
         # print('self.initial_pad',self.initial_pad)
 
-        # Contracting Path (Encoder + Bottleneck)
+    # U-Net 收缩路径（编码器 + 瓶颈层）
         self.encoder = nn.Sequential()
         layer_index = 0;
         layer = nn.Sequential();
@@ -93,7 +93,7 @@ class UnetVggMultihead(nn.Module):
         self.bottleneck.add_module('bottleneck_relu'+'_2', nn.ReLU(inplace=True))
      
 
-        # Expanding Path (Decoder)
+        # U-Net 扩张路径（解码器）
         self.decoder = nn.Sequential()
         layer_index = 3;
         layer = nn.Sequential();
@@ -128,7 +128,11 @@ class UnetVggMultihead(nn.Module):
         self.decoder.add_module('decoder_l_'+str(layer_index), layer);
 
         self.final_layers_lst=nn.ModuleList()
-        # Ideally, there are 4 heads: cell detection, cell classification, cell class sub cluster classification, cell cross K-functions
+        # 理想情况下模型包含 4 个输出头：
+        # 1. 细胞检测
+        # 2. 细胞分类
+        # 3. 细胞子类/聚类分类
+        # 4. 细胞 cross K-function 回归
         for i in range(self.n_heads):
             block = nn.Sequential();
             feat_subblock = nn.Sequential();
@@ -157,27 +161,31 @@ class UnetVggMultihead(nn.Module):
 
     def forward(self,x, feat_indx_list=[], feat_as_dict=False):
         '''
-            x: input image normalized by dividing by 255
-            feat_indx_list: list of indices corresponding to features generated at different model blocks.
-                If list is not empty, then the features listed will be returned
+            x: 输入图像，默认已完成除以 255 的归一化。
+            feat_indx_list: 指定需要返回哪些层的特征。
+                若该列表非空，则除预测结果外，还会返回对应编号的特征。
                 feature_code = {'decoder':0, 'cell-detect':1, 'class':2, 'subclass':3, 'k-cell':4}
-            feat_as_dict: if feat_indx_list is not empty, the features indicated in the list will be returned in the form of a dictonary, where key is features index identifier and value is the features
+            feat_as_dict: 当 feat_indx_list 非空时，
+                若为 True，则将特征按字典形式返回，键为特征编号，值为特征张量；
+                否则返回拼接后的特征数组。
         '''
         feat = None
         feat_dict = {}
         feat_indx = 0
         encoder_out = [];
         for l in self.encoder:     
+            # 依次通过编码器各层，并缓存中间特征用于后续跳跃连接
             x = l(x);
             encoder_out.append(x);
         x = self.bottleneck(x);
         j = len(self.decoder);
         for l in self.decoder:            
+            # 先反卷积上采样，再与对应编码器层特征做裁剪后拼接
             x = l[0](x);
             j -= 1;
             corresponding_layer_indx = j;
 
-            ## crop and concatenate
+            ## 对编码器特征进行裁剪并与当前解码器特征拼接
             if(j > 0):
                 cropped = CNNArchUtilsPyTorch.crop_a_to_b(encoder_out[corresponding_layer_indx],  x);
                 x = torch.cat((cropped, x), 1) ;
@@ -185,7 +193,7 @@ class UnetVggMultihead(nn.Module):
                 x = l[i](x);
 
 
-        # Check if decoder features will be returned in output
+        # 检查是否需要把解码器最终特征作为附加输出返回
         if(feat_indx in feat_indx_list):
             if(feat_as_dict):
                 feat_dict[feat_indx] = x.detach().cpu().numpy()
@@ -196,14 +204,14 @@ class UnetVggMultihead(nn.Module):
         f=None
         for layer in self.final_layers_lst:
             feat_indx += 1
-            f1 = layer[0](x) # output features from current head
-            c.append(layer[1](f1)) # output prediction from current head
+            f1 = layer[0](x) # 当前输出头的中间特征
+            c.append(layer[1](f1)) # 当前输出头的最终预测结果
             if(f is None):
                 f = f1
             else:
                 f = torch.cat((f1, f), 1) ;
 
-            # Check if current head features will be returned in output
+            # 检查当前输出头的特征是否也需要返回
             if(feat_indx in feat_indx_list):
                 if(feat_as_dict):
                     feat_dict[feat_indx] = f1.detach().cpu().numpy()
@@ -213,17 +221,18 @@ class UnetVggMultihead(nn.Module):
                     else:
                         feat= np.concatenate((feat, f1.detach().cpu().numpy()), axis=1)
 
-        # If no features requested, then just return predictions list
+        # 若没有请求返回中间特征，则仅返回各输出头预测结果
         if(len(feat_indx_list) == 0):
             return c
 
-        # Return predictions with features requested
+        # 若请求了中间特征，则连同预测结果一起返回
         if(feat_as_dict):
             return c,feat_dict;
         return c,feat;
             
 
     def _initialize_weights(self):
+        # 初始化编码器卷积层参数
         for l in self.encoder:
             for layer in l:
                 if(isinstance(layer, nn.ConvTranspose2d) or isinstance(layer, nn.Conv2d)):
@@ -236,6 +245,7 @@ class UnetVggMultihead(nn.Module):
                     elif(self.conv_init == 'he'):
                         torch.nn.init.kaiming_normal_(layer.weight, mode='fan_out', nonlinearity='relu') ; 
 
+        # 初始化瓶颈层卷积参数
         for layer in self.bottleneck:
             if(isinstance(layer, nn.ConvTranspose2d) or isinstance(layer, nn.Conv2d)):
                 if(self.conv_init == 'normal'):
@@ -248,6 +258,7 @@ class UnetVggMultihead(nn.Module):
                     torch.nn.init.kaiming_normal_(layer.weight, mode='fan_out', nonlinearity='relu') ; 
 
 
+        # 初始化解码器卷积参数
         for l in self.decoder:
             for layer in l:
                 if(isinstance(layer, nn.ConvTranspose2d) or isinstance(layer, nn.Conv2d)):
@@ -261,6 +272,7 @@ class UnetVggMultihead(nn.Module):
                         torch.nn.init.kaiming_normal_(layer.weight, mode='fan_out', nonlinearity='relu') ; 
 
 
+        # 初始化各个输出头中的卷积参数
         for layer in self.final_layers_lst:
             if(isinstance(layer, nn.ConvTranspose2d) or isinstance(layer, nn.Conv2d)):
                 if(self.conv_init == 'normal'):
@@ -273,7 +285,7 @@ class UnetVggMultihead(nn.Module):
                     torch.nn.init.kaiming_normal_(layer.weight, mode='fan_out', nonlinearity='relu') ; 
 
 
-        # Initialize encoder and bottleneck from VGG-16 pretrained model
+        # 用预训练 VGG-16 参数初始化编码器和瓶颈层，借助分类模型的底层视觉特征加速收敛
         vgg_model = models.vgg16(pretrained = True)
         fsd=collections.OrderedDict()
         i = 0
