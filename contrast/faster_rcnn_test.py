@@ -1,6 +1,3 @@
-
-
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -24,12 +21,12 @@ from utils import (
 DATA_ROOT = Path("data") / "CoNSeP"
 ANNOTATIONS_CSV = DATA_ROOT / "annotations" / "boxes.csv"
 CLASSES_CSV = DATA_ROOT / "metadata" / "classes.csv"
-SPLIT = 'train'		# 使用的测试集
+SPLIT = 'test'		# 使用的测试集
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TEST_BATCH_SIZE = 2
-NUM_WORKERS = 0
-SCORE_THRESHOLD = 0.7
+NUM_WORKERS = 0 if torch.platform.system() == "Windows" else 16
+SCORE_THRESHOLD = 0.05
 IOU_THRESHOLD = 0.5
 RESULTS_FILE_NAME = "test_results.txt"
 VISUALIZATION_DIR_NAME = "visualizations"

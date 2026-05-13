@@ -6,8 +6,8 @@ import numpy as np
 import torch
 from datetime import datetime
 
-CHECKPOINTS_ROOT_DIR = './exp'   # 所有训练输出的根目录
-CHECKPOINTS_FOLDER_NAME = 'exp1_faster_rcnn_consep' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下
+CHECKPOINTS_ROOT_DIR = './exp'      # 所有训练输出的根目录
+CHECKPOINTS_FOLDER_NAME = 'exp5_faster_rcnn_consep'     # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下
 SEED = 42
 TYPE = 'faster_rcnn'
 

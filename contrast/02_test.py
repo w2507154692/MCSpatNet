@@ -4,11 +4,11 @@ from pathlib import Path
 
 CHECKPOINTS_ROOT_DIR = './exp'   # 所有训练输出的根目录
 # 当前实验对应的子目录名称，最终模型权重会从 <checkpoints_root_dir>/<checkpoints_folder_name> 下读取。
-CHECKPOINTS_FOLDER_NAME = 'exp1_faster_rcnn_consep'
+CHECKPOINTS_FOLDER_NAME = 'exp4_faster_rcnn_consep'
 EVAL_ROOT_DIR = './exp'
-EPOCH = 246
+EPOCH = 91
 TYPE = 'baseline'
-SUFFIX = '_on_train_data'   # 后缀，进行额外补充，默认为空
+SUFFIX = ''   # 后缀，进行额外补充，默认为空
 
 def test():
     checkpoints_save_dir = os.path.join(CHECKPOINTS_ROOT_DIR, CHECKPOINTS_FOLDER_NAME)
