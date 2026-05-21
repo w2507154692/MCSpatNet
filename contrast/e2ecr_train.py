@@ -409,7 +409,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 
 				batch_size = max(1, len(outputs))
 				loss_dict = {name: value / batch_size for name, value in loss_dict.items()}
-				loss_dict["loss_total"] = model_config.lambda_reg * loss_dict["loss_reg"] + loss_dict["loss_det"] + loss_dict["loss_cls"]
+				loss_dict["loss_total"] = LAMBDA_REG * loss_dict["loss_reg"] + loss_dict["loss_det"] + loss_dict["loss_cls"]
 				total_loss = loss_dict["loss_total"]
 
 				# 验证阶段同样保护数值稳定性，避免某个坏 batch 直接污染整轮统计。
