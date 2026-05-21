@@ -12,9 +12,6 @@ from torch.utils.data import Dataset
 from torchvision.transforms import functional as F
 
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-
-
 class MoNuSACDataset(Dataset):
 	"""读取 MoNuSAC patch 检测数据。
 
@@ -164,7 +161,7 @@ class BRCAM2CE2ECRDataset(Dataset):
 
 	def _resolve_split_file(self, phase: str) -> Path:
 		dataset_name = self.data_root.name.lower()
-		split_dir = _REPO_ROOT / "data_splits" / dataset_name
+		split_dir = self.data_root / "data_splits"
 		phase_to_split = {
 			"train": "train_split.txt",
 			"val": "val_split.txt",
