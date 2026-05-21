@@ -9,7 +9,7 @@ CHECKPOINTS_FOLDER_NAME = 'exp12_e2ecr_brcam2c'
 EVAL_ROOT_DIR = './exp'
 EPOCH = 18
 TYPE = 'e2ecr'
-SUFFIX = ''   # 后缀，进行额外补充，默认为空
+SUFFIX = '_new_nms'   # 后缀，进行额外补充，默认为空
 
 # 备份代码到实验目录下
 def backup_python_files(experiment_dir):
