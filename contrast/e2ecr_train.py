@@ -35,8 +35,21 @@ TRAIN_CROP_SIZE = 384
 
 
 def e2ecr_train(checkpoints_save_dir, logger):
+	"""E2ECR 训练入口。
+
+	这个函数故意写成单函数、平铺直叙的形式：
+	1. 先构建数据集、数据加载器、模型和优化器。
+	2. 再直接执行每个 epoch 的训练与验证。
+	3. 损失计算、匈牙利匹配、日志统计、最佳权重保存都在这里完成。
+
+	这样做的目的不是追求可扩展性，而是让脚本执行路径足够直接，
+	方便按顺序阅读和逐行调试。
+	"""
+	# 先准备输出目录，后续每次验证变好时会把当前最佳权重写到这里。
 	checkpoints_dir = Path(checkpoints_save_dir)
 	checkpoints_dir.mkdir(parents=True, exist_ok=True)
+
+	# 数据集对象只接收数据根目录和数据集类型，split 文件在数据集内部自行解析。
 	train_dataset = build_e2ecr_dataset(
 		dataset_type=DATASET_TYPE,
 		data_root=DATA_ROOT,
@@ -50,6 +63,8 @@ def e2ecr_train(checkpoints_save_dir, logger):
 		crop_size=TRAIN_CROP_SIZE,
 	)
 
+	# collate_fn 只负责把样本整理成 list，不在这里做 padding。
+	# 真正的批量 padding 与裁回逻辑已经下沉到模型 forward 中完成。
 	train_loader = DataLoader(
 		train_dataset,
 		batch_size=BATCH_SIZE,
@@ -67,6 +82,11 @@ def e2ecr_train(checkpoints_save_dir, logger):
 		collate_fn=e2ecr_collate_fn,
 	)
 
+	# 模型本身现在只输出三张预测图：
+	# reg: 每个像素位置对应的点偏移；
+	# det: 前景/背景二分类 logits；
+	# cls: 细胞类别 logits。
+	# 损失如何计算，完全在训练脚本里显式展开。
 	model_config = E2ECRConfig(num_classes=get_e2ecr_num_classes(DATASET_TYPE))
 	model = build_e2ecr(model_config).to(DEVICE)
 	optimizer = AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
@@ -84,7 +104,9 @@ def e2ecr_train(checkpoints_save_dir, logger):
 	)
 	logger.info(f"模型配置: {asdict(model_config)}")
 
+	# 外层循环按 epoch 推进：每个 epoch 先训练，再按设定频率做验证。
 	for epoch in range(1, NUM_EPOCHS + 1):
+		# 训练阶段打开 BN/Dropout 的训练行为，并重置本 epoch 的累计量。
 		model.train()
 		train_running_total_loss = 0.0
 		train_running_metrics = {"loss_cls": 0.0, "loss_det": 0.0, "loss_reg": 0.0, "loss_total": 0.0}
@@ -92,14 +114,17 @@ def e2ecr_train(checkpoints_save_dir, logger):
 		train_progress_bar = tqdm(train_loader, desc=f"Train Epoch {epoch}", leave=False)
 
 		for step, (images, targets) in enumerate(train_progress_bar, start=1):
+			# 图像和标注统一搬到目标设备。target 中既有 tensor，也有 image_name 这类字符串，
+			# 所以这里只对 tensor 字段做 to(device)。
 			images = [image.to(DEVICE) for image in images]
 			targets = [
 				{key: value.to(DEVICE) if torch.is_tensor(value) else value for key, value in target.items()}
 				for target in targets
 			]
 
-			# KEY：前向传播
+			# 前向传播后得到的是每张图的原始预测图，而不是已经解码好的点。
 			outputs = model(images)
+			# 先在 batch 维度上累计三项子损失，后面再除以 batch size。
 			loss_dict = {
 				"loss_cls": torch.zeros((), device=DEVICE),
 				"loss_det": torch.zeros((), device=DEVICE),
@@ -107,33 +132,45 @@ def e2ecr_train(checkpoints_save_dir, logger):
 			}
 
 			for output, target in zip(outputs, targets):
+				# 每张图都会产生三张像素级预测图。
 				reg_map = output["reg"]
 				det_map = output["det"]
 				cls_map = output["cls"]
 				image_height, image_width = det_map.shape[-2], det_map.shape[-1]
 
+				# 将 [C, H, W] 形式的预测图展平到 [H*W, C]，
+				# 这样后面每一行都对应一个候选像素位置，便于统一计算。
 				reg_logits = reg_map.permute(1, 2, 0).reshape(-1, 2)
 				det_logits = det_map.permute(1, 2, 0).reshape(-1, 2)
 				cls_logits = cls_map.permute(1, 2, 0).reshape(-1, model_config.num_classes)
 
+				# 为每个像素生成其原始网格坐标，再加上回归头预测的偏移量，
+				# 得到最终的候选点坐标 pred_points。
 				y_coords = torch.arange(image_height, device=DEVICE, dtype=reg_logits.dtype)
 				x_coords = torch.arange(image_width, device=DEVICE, dtype=reg_logits.dtype)
 				y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
 				base_points = torch.stack([x_grid, y_grid], dim=-1).reshape(-1, 2)
 				pred_points = base_points + reg_logits
 
+				# det_probs[:, 1] 是“该像素位置像不像一个细胞点”的前景概率。
+				# cls_probs 则描述这个位置属于哪个细胞类别的概率分布。
 				det_probs = torch.softmax(det_logits, dim=1)
 				obj_scores = det_probs[:, 1]
 				cls_probs = torch.softmax(cls_logits, dim=1)
 
+				# gt_points / gt_labels 是该图中所有真实点及其类别。
+				# det_targets 默认全为背景，只有成功匹配到真实点的位置才会被置为前景。
 				gt_points = target["points"]
 				gt_labels = target["labels"]
 				det_targets = torch.zeros(det_logits.shape[0], dtype=torch.long, device=DEVICE)
+				# 当一张图没有真实点，或者后面没有形成有效匹配时，
+				# 回归损失和分类损失保持为 0，但仍保留检测损失监督背景。
 				zero_loss = det_logits.sum() * 0.0
 				loss_reg = zero_loss
 				loss_cls = zero_loss
 
-				# KEY：匈牙利算法匹配预测和 ground truth
+				# 匈牙利匹配只在存在真实点时才需要执行。
+				# 为了避免在整张图的全部像素上做匹配，这里先按目标性分数选一批候选点。
 				if gt_points.shape[0] > 0:
 					num_candidates = max(model_config.min_candidates, int(gt_points.shape[0]) * model_config.candidate_multiplier)
 					num_candidates = min(num_candidates, model_config.max_candidates, obj_scores.shape[0])
@@ -145,10 +182,17 @@ def e2ecr_train(checkpoints_save_dir, logger):
 					)
 					candidate_points = pred_points[candidate_indices]
 					candidate_cls_probs = cls_probs[candidate_indices]
+					# 代价函数由三部分组成：
+					# 1. 点之间的欧氏距离；
+					# 2. 检测头给出的前景得分；
+					# 3. 分类头给出真实类别的置信度。
+					# 距离越小越好，前景/分类分数越大越好，因此后两项在代价里用减号。
 					distance_matrix = torch.cdist(candidate_points, gt_points, p=2)
 					class_score_matrix = candidate_cls_probs[:, gt_labels]
 					cost_matrix = model_config.alpha * distance_matrix - candidate_scores.unsqueeze(1) - class_score_matrix
 
+					# SciPy 的 linear_sum_assignment 会返回一组一对一匹配结果。
+					# 匹配上的候选点会被视为正样本，同时用于回归和分类监督。
 					matched_candidate_rows, matched_gt_cols = linear_sum_assignment(cost_matrix.detach().cpu().numpy())
 					if len(matched_candidate_rows) > 0:
 						matched_candidate_rows = torch.as_tensor(matched_candidate_rows, dtype=torch.long, device=DEVICE)
@@ -158,20 +202,25 @@ def e2ecr_train(checkpoints_save_dir, logger):
 						loss_reg = F.mse_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
 						loss_cls = F.cross_entropy(cls_logits[matched_indices], gt_labels[matched_gt_cols])
 
+				# 检测损失在全部像素位置上计算。
+				# 这里用 beta 对正负样本重新加权，减轻前景点稀少带来的类别不平衡问题。
 				det_losses = F.cross_entropy(det_logits, det_targets, reduction="none")
 				det_weights = torch.full_like(det_losses, 1.0 - model_config.beta)
 				det_weights[det_targets == 1] = model_config.beta
 				loss_det = (det_losses * det_weights).mean()
 
+				# 先累计单张图损失，后面统一对 batch 求平均。
 				loss_dict["loss_reg"] = loss_dict["loss_reg"] + loss_reg
 				loss_dict["loss_det"] = loss_dict["loss_det"] + loss_det
 				loss_dict["loss_cls"] = loss_dict["loss_cls"] + loss_cls
 
+			# batch 内各图平均后，再按照论文/设定中的权重组合总损失。
 			batch_size = max(1, len(outputs))
 			loss_dict = {name: value / batch_size for name, value in loss_dict.items()}
 			loss_dict["loss_total"] = model_config.lambda_reg * loss_dict["loss_reg"] + loss_dict["loss_det"] + loss_dict["loss_cls"]
 			total_loss = loss_dict["loss_total"]
 
+			# 若当前 batch 已经数值发散，则直接跳过，避免把异常梯度传回模型。
 			if not torch.isfinite(total_loss):
 				logger.warning(
 					f"Epoch {epoch} train Step {step}/{len(train_loader)} 出现非有限 loss，跳过该 batch: "
@@ -182,11 +231,13 @@ def e2ecr_train(checkpoints_save_dir, logger):
 				optimizer.zero_grad()
 				continue
 
+			# 标准训练步骤：清梯度、反传、梯度裁剪、参数更新。
 			optimizer.zero_grad()
 			total_loss.backward()
 			torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
 			optimizer.step()
 
+			# 下面这些统计量只用于日志和 epoch 级平均值展示。
 			train_valid_steps += 1
 			train_running_total_loss += total_loss.item()
 			for name, value in loss_dict.items():
@@ -210,9 +261,14 @@ def e2ecr_train(checkpoints_save_dir, logger):
 			+ " | ".join(f"{name}={value:.6f}" for name, value in sorted(train_metrics.items()))
 		)
 
+		# 允许通过 EVAL_INTERVAL_EPOCHS 控制验证频率，避免每轮都验证带来的额外开销。
 		if epoch % EVAL_INTERVAL_EPOCHS != 0 and epoch != NUM_EPOCHS:
 			continue
 
+		# 验证阶段与训练阶段的主要区别是：
+		# 1. 不做反向传播；
+		# 2. 不更新参数；
+		# 3. 仍然用完全相同的损失定义来评估当前模型质量。
 		model.eval()
 		val_running_total_loss = 0.0
 		val_running_metrics = {"loss_cls": 0.0, "loss_det": 0.0, "loss_reg": 0.0, "loss_total": 0.0}
@@ -221,6 +277,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 
 		with torch.no_grad():
 			for step, (images, targets) in enumerate(val_progress_bar, start=1):
+				# 验证时仍旧逐 batch 前向，只是整个过程放在 no_grad 下，节省显存和时间。
 				images = [image.to(DEVICE) for image in images]
 				targets = [
 					{key: value.to(DEVICE) if torch.is_tensor(value) else value for key, value in target.items()}
@@ -235,6 +292,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 				}
 
 				for output, target in zip(outputs, targets):
+					# 下面这段与训练阶段保持一致，保证 train / val 的损失口径完全相同。
 					reg_map = output["reg"]
 					det_map = output["det"]
 					cls_map = output["cls"]
@@ -261,6 +319,8 @@ def e2ecr_train(checkpoints_save_dir, logger):
 					loss_reg = zero_loss
 					loss_cls = zero_loss
 
+					# 验证集也走同样的候选点筛选和匈牙利匹配逻辑，
+					# 这样得到的 val_loss 才能和 train_loss 对齐比较。
 					if gt_points.shape[0] > 0:
 						num_candidates = max(model_config.min_candidates, int(gt_points.shape[0]) * model_config.candidate_multiplier)
 						num_candidates = min(num_candidates, model_config.max_candidates, obj_scores.shape[0])
@@ -285,6 +345,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 							loss_reg = F.mse_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
 							loss_cls = F.cross_entropy(cls_logits[matched_indices], gt_labels[matched_gt_cols])
 
+					# 检测损失依旧覆盖整张图，用于衡量背景和前景的整体分离效果。
 					det_losses = F.cross_entropy(det_logits, det_targets, reduction="none")
 					det_weights = torch.full_like(det_losses, 1.0 - model_config.beta)
 					det_weights[det_targets == 1] = model_config.beta
@@ -299,6 +360,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 				loss_dict["loss_total"] = model_config.lambda_reg * loss_dict["loss_reg"] + loss_dict["loss_det"] + loss_dict["loss_cls"]
 				total_loss = loss_dict["loss_total"]
 
+				# 验证阶段同样保护数值稳定性，避免某个坏 batch 直接污染整轮统计。
 				if not torch.isfinite(total_loss):
 					logger.warning(
 						f"Epoch {epoch} val Step {step}/{len(val_loader)} 出现非有限 loss，跳过该 batch: "
@@ -328,6 +390,8 @@ def e2ecr_train(checkpoints_save_dir, logger):
 			+ " | ".join(f"{name}={value:.6f}" for name, value in sorted(val_metrics.items()))
 		)
 
+		# 这里只保留“当前最好”的权重文件。
+		# 一旦验证损失刷新，就删除上一份最佳权重，避免目录里累积过多 checkpoint。
 		if val_loss < best_val_loss:
 			previous_best = best_val_loss
 			best_val_loss = val_loss
