@@ -14,16 +14,6 @@ class E2ECRConfig:
 	input_channels: int = 3
 	num_classes: int = 3
 	base_channels: int = 32
-	alpha: float = 0.05
-	beta: float = 0.6
-	lambda_reg: float = 2e-3
-	candidate_multiplier: int = 8
-	min_candidates: int = 128
-	max_candidates: int = 2048
-	inference_obj_threshold: float = 0.2
-	inference_score_threshold: float = 0.15
-	nms_radius: float = 6.0
-	max_predictions_per_image: int = 512
 
 
 class ConvBlock(nn.Module):

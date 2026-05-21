@@ -20,7 +20,8 @@ DATASET_TYPE = "brca-m2c"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TEST_BATCH_SIZE = 1
 NUM_WORKERS = 0 if platform.system() == "Windows" else 4
-DISTANCE_THRESHOLD = 6.0
+DISTANCE_THRESHOLD = 12.0
+INFERENCE_SCORE_THRESHOLD = 0.3
 RESULTS_FILE_NAME = "test_results.txt"
 VISUALIZATION_DIR_NAME = "visualizations"
 PREDICTION_DIR_NAME = "predictions"
@@ -29,6 +30,7 @@ CLASS_COLORS = ["lime", "orange", "cyan"]
 
 
 def e2ecr_test(out_dir, pth_file_path):
+	# 测试入口：载入模型后，对测试集逐张前向、解码预测点、计算指标并保存可视化结果。
 	out_dir = Path(out_dir)
 	out_dir.mkdir(parents=True, exist_ok=True)
 	results_file = out_dir / RESULTS_FILE_NAME
@@ -64,6 +66,7 @@ def e2ecr_test(out_dir, pth_file_path):
 	with torch.inference_mode():
 		progress_bar = tqdm(test_loader, desc="Test", leave=False)
 		for images, targets in progress_bar:
+			# 测试阶段只做前向和后处理，不做梯度相关操作。
 			images = [image.to(DEVICE) for image in images]
 			outputs = model(images)
 
@@ -211,6 +214,7 @@ def e2ecr_test(out_dir, pth_file_path):
 
 
 def _load_model_config(checkpoint):
+	# 兼容旧 checkpoint：如果里面没有模型配置，就回退到默认配置。
 	model_config_dict = checkpoint.get("model_config")
 	if model_config_dict is None:
 		return E2ECRConfig(num_classes=get_e2ecr_num_classes(DATASET_TYPE))
@@ -218,6 +222,8 @@ def _load_model_config(checkpoint):
 
 
 def _decode_prediction_maps(output, model_config):
+	# 将模型输出的三张预测图恢复成点集合。
+	# 这里不做 NMS，只按最终置信度阈值筛选所有候选预测。
 	reg_map = output["reg"]
 	det_map = output["det"]
 	cls_map = output["cls"]
@@ -239,9 +245,7 @@ def _decode_prediction_maps(output, model_config):
 	cls_scores, pred_labels = torch.max(cls_probs, dim=1)
 	final_scores = obj_scores * cls_scores
 
-	keep_mask = (obj_scores >= model_config.inference_obj_threshold) & (
-		final_scores >= model_config.inference_score_threshold
-	)
+	keep_mask = final_scores >= INFERENCE_SCORE_THRESHOLD
 	if keep_mask.sum().item() == 0:
 		return (
 			torch.zeros((0, 2), dtype=pred_points.dtype, device=pred_points.device),
@@ -252,26 +256,12 @@ def _decode_prediction_maps(output, model_config):
 	pred_points = pred_points[keep_mask]
 	pred_labels = pred_labels[keep_mask]
 	final_scores = final_scores[keep_mask]
-
-	sorted_indices = torch.argsort(final_scores, descending=True)
-	selected_indices = []
-	for candidate_index in sorted_indices.tolist():
-		candidate_point = pred_points[candidate_index]
-		should_keep = True
-		for kept_index in selected_indices:
-			if torch.norm(candidate_point - pred_points[kept_index], p=2).item() <= model_config.nms_radius:
-				should_keep = False
-				break
-		if should_keep:
-			selected_indices.append(candidate_index)
-			if len(selected_indices) >= model_config.max_predictions_per_image:
-				break
-
-	selected_indices = torch.as_tensor(selected_indices, dtype=torch.long, device=pred_points.device)
-	return pred_points[selected_indices], pred_labels[selected_indices], final_scores[selected_indices]
+	return pred_points, pred_labels, final_scores
 
 
 def _match_points(pred_points, pred_labels, gt_points, gt_labels, distance_threshold, ignore_class):
+	# 指标匹配采用一对一贪心策略：
+	# 先收集所有满足距离阈值的预测-GT 对，再按距离从小到大依次占用。
 	if pred_points.shape[0] == 0:
 		return 0, 0, int(gt_points.shape[0])
 	if gt_points.shape[0] == 0:
@@ -302,6 +292,7 @@ def _match_points(pred_points, pred_labels, gt_points, gt_labels, distance_thres
 
 
 def _compute_precision_recall_f1(tp, fp, fn):
+	# 由 TP / FP / FN 直接计算 precision、recall 和 F1。
 	precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
 	recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
 	f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
@@ -309,6 +300,7 @@ def _compute_precision_recall_f1(tp, fp, fn):
 
 
 def _visualize_points(image_tensor, save_path, gt_points, gt_labels, pred_points, pred_labels, pred_scores):
+	# 可视化时用十字标出 GT，用圆圈和分数标出预测点，便于人工排查。
 	image = F.to_pil_image(image_tensor)
 	draw = ImageDraw.Draw(image)
 	for point, label in zip(gt_points.tolist(), gt_labels.tolist()):
@@ -323,6 +315,7 @@ def _visualize_points(image_tensor, save_path, gt_points, gt_labels, pred_points
 
 
 def _draw_point(draw, point, color, radius, with_cross):
+	# 统一绘制点标记，GT 可带十字，预测只画圆圈。
 	x_coord, y_coord = float(point[0]), float(point[1])
 	draw.ellipse((x_coord - radius, y_coord - radius, x_coord + radius, y_coord + radius), outline=color, width=2)
 	if with_cross:

@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 
 from dataset import MoNuSACDataset, detection_collate_fn, get_num_classes
 from faster_rcnn import FasterRCNNConfig, build_faster_rcnn
-from utils import (
+from contrast.faster_rcnn_utils import (
 	build_label_id_to_name,
 	compute_precision_recall_f1,
 	filter_predictions_by_score,

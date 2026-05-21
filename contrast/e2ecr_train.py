@@ -20,8 +20,8 @@ DATA_ROOT = Path("data") / "BRCA-M2C"
 DATASET_TYPE = "brca-m2c"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-NUM_EPOCHS = 200
-BATCH_SIZE = 4
+NUM_EPOCHS = 100
+BATCH_SIZE = 12
 VAL_BATCH_SIZE = 4
 NUM_WORKERS = 0 if platform.system() == "Windows" else 8
 LEARNING_RATE = 1e-4
@@ -32,7 +32,12 @@ EVAL_INTERVAL_EPOCHS = 1
 PRINT_FREQ = 10
 GRAD_CLIP_NORM = 5.0
 TRAIN_CROP_SIZE = 384
-
+MAX_CANDIDATES_NUM = 500
+ALPHA = 0.05
+BETA = 0.06
+LAMBDA_REG = 1e-3
+INFERENCE_SCORE_THRESHOLD = 0.3
+VAL_DISTANCE_THRESHOLD = 12.0
 
 def e2ecr_train(checkpoints_save_dir, logger):
 	"""E2ECR 训练入口。
@@ -93,6 +98,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 	scheduler = StepLR(optimizer, step_size=LR_STEP_SIZE, gamma=LR_GAMMA)
 
 	best_val_loss = float("inf")
+	best_val_f1 = float("-inf")
 	best_checkpoint_path: Path | None = None
 
 	logger.info(f"训练设备: {DEVICE}")
@@ -122,6 +128,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 				for target in targets
 			]
 
+			# KEY：前向传播
 			# 前向传播后得到的是每张图的原始预测图，而不是已经解码好的点。
 			outputs = model(images)
 			# 先在 batch 维度上累计三项子损失，后面再除以 batch size。
@@ -169,14 +176,14 @@ def e2ecr_train(checkpoints_save_dir, logger):
 				loss_reg = zero_loss
 				loss_cls = zero_loss
 
+				# KEY：匈牙利算法
 				# 匈牙利匹配只在存在真实点时才需要执行。
 				# 为了避免在整张图的全部像素上做匹配，这里先按目标性分数选一批候选点。
 				if gt_points.shape[0] > 0:
-					num_candidates = max(model_config.min_candidates, int(gt_points.shape[0]) * model_config.candidate_multiplier)
-					num_candidates = min(num_candidates, model_config.max_candidates, obj_scores.shape[0])
+					pred_num = obj_scores.shape[0]	# 预测的细胞个数
 					candidate_scores, candidate_indices = torch.topk(
 						obj_scores,
-						k=num_candidates,
+						k=MAX_CANDIDATES_NUM,
 						largest=True,
 						sorted=False,
 					)
@@ -189,7 +196,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 					# 距离越小越好，前景/分类分数越大越好，因此后两项在代价里用减号。
 					distance_matrix = torch.cdist(candidate_points, gt_points, p=2)
 					class_score_matrix = candidate_cls_probs[:, gt_labels]
-					cost_matrix = model_config.alpha * distance_matrix - candidate_scores.unsqueeze(1) - class_score_matrix
+					cost_matrix = ALPHA * distance_matrix - candidate_scores.unsqueeze(1) - class_score_matrix
 
 					# SciPy 的 linear_sum_assignment 会返回一组一对一匹配结果。
 					# 匹配上的候选点会被视为正样本，同时用于回归和分类监督。
@@ -205,8 +212,8 @@ def e2ecr_train(checkpoints_save_dir, logger):
 				# 检测损失在全部像素位置上计算。
 				# 这里用 beta 对正负样本重新加权，减轻前景点稀少带来的类别不平衡问题。
 				det_losses = F.cross_entropy(det_logits, det_targets, reduction="none")
-				det_weights = torch.full_like(det_losses, 1.0 - model_config.beta)
-				det_weights[det_targets == 1] = model_config.beta
+				det_weights = torch.full_like(det_losses, 1.0 - BETA)
+				det_weights[det_targets == 1] = BETA
 				loss_det = (det_losses * det_weights).mean()
 
 				# 先累计单张图损失，后面统一对 batch 求平均。
@@ -217,7 +224,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 			# batch 内各图平均后，再按照论文/设定中的权重组合总损失。
 			batch_size = max(1, len(outputs))
 			loss_dict = {name: value / batch_size for name, value in loss_dict.items()}
-			loss_dict["loss_total"] = model_config.lambda_reg * loss_dict["loss_reg"] + loss_dict["loss_det"] + loss_dict["loss_cls"]
+			loss_dict["loss_total"] = LAMBDA_REG * loss_dict["loss_reg"] + loss_dict["loss_det"] + loss_dict["loss_cls"]
 			total_loss = loss_dict["loss_total"]
 
 			# 若当前 batch 已经数值发散，则直接跳过，避免把异常梯度传回模型。
@@ -265,6 +272,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 		if epoch % EVAL_INTERVAL_EPOCHS != 0 and epoch != NUM_EPOCHS:
 			continue
 
+		# KEY：验证阶段
 		# 验证阶段与训练阶段的主要区别是：
 		# 1. 不做反向传播；
 		# 2. 不更新参数；
@@ -273,6 +281,9 @@ def e2ecr_train(checkpoints_save_dir, logger):
 		val_running_total_loss = 0.0
 		val_running_metrics = {"loss_cls": 0.0, "loss_det": 0.0, "loss_reg": 0.0, "loss_total": 0.0}
 		val_valid_steps = 0
+		val_tp = 0
+		val_fp = 0
+		val_fn = 0
 		val_progress_bar = tqdm(val_loader, desc=f"Val Epoch {epoch}", leave=False)
 
 		with torch.no_grad():
@@ -322,11 +333,10 @@ def e2ecr_train(checkpoints_save_dir, logger):
 					# 验证集也走同样的候选点筛选和匈牙利匹配逻辑，
 					# 这样得到的 val_loss 才能和 train_loss 对齐比较。
 					if gt_points.shape[0] > 0:
-						num_candidates = max(model_config.min_candidates, int(gt_points.shape[0]) * model_config.candidate_multiplier)
-						num_candidates = min(num_candidates, model_config.max_candidates, obj_scores.shape[0])
+						pred_num = obj_scores.shape[0]	# 预测的细胞个数
 						candidate_scores, candidate_indices = torch.topk(
 							obj_scores,
-							k=num_candidates,
+							k=MAX_CANDIDATES_NUM,
 							largest=True,
 							sorted=False,
 						)
@@ -334,7 +344,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 						candidate_cls_probs = cls_probs[candidate_indices]
 						distance_matrix = torch.cdist(candidate_points, gt_points, p=2)
 						class_score_matrix = candidate_cls_probs[:, gt_labels]
-						cost_matrix = model_config.alpha * distance_matrix - candidate_scores.unsqueeze(1) - class_score_matrix
+						cost_matrix = ALPHA * distance_matrix - candidate_scores.unsqueeze(1) - class_score_matrix
 
 						matched_candidate_rows, matched_gt_cols = linear_sum_assignment(cost_matrix.detach().cpu().numpy())
 						if len(matched_candidate_rows) > 0:
@@ -347,13 +357,55 @@ def e2ecr_train(checkpoints_save_dir, logger):
 
 					# 检测损失依旧覆盖整张图，用于衡量背景和前景的整体分离效果。
 					det_losses = F.cross_entropy(det_logits, det_targets, reduction="none")
-					det_weights = torch.full_like(det_losses, 1.0 - model_config.beta)
-					det_weights[det_targets == 1] = model_config.beta
+					det_weights = torch.full_like(det_losses, 1.0 - BETA)
+					det_weights[det_targets == 1] = BETA
 					loss_det = (det_losses * det_weights).mean()
 
 					loss_dict["loss_reg"] = loss_dict["loss_reg"] + loss_reg
 					loss_dict["loss_det"] = loss_dict["loss_det"] + loss_det
 					loss_dict["loss_cls"] = loss_dict["loss_cls"] + loss_cls
+
+					# 验证时把所有密集预测先转成点，再按置信度阈值筛掉低质量预测。
+					# 这里不再做 NMS，而是直接把保留下来的所有预测与 GT 做一对一距离匹配。
+					decoded_det_probs = torch.softmax(det_logits, dim=1)
+					decoded_obj_scores = decoded_det_probs[:, 1]
+					decoded_cls_probs = torch.softmax(cls_logits, dim=1)
+					decoded_cls_scores, decoded_pred_labels = torch.max(decoded_cls_probs, dim=1)
+					decoded_final_scores = decoded_obj_scores * decoded_cls_scores
+					keep_mask = decoded_final_scores >= INFERENCE_SCORE_THRESHOLD
+
+					if keep_mask.sum().item() > 0:
+						decoded_pred_points = pred_points[keep_mask].detach().cpu().numpy()
+						decoded_pred_labels = decoded_pred_labels[keep_mask].detach().cpu().numpy()
+					else:
+						decoded_pred_points = gt_points.new_zeros((0, 2)).detach().cpu().numpy()
+						decoded_pred_labels = gt_labels.new_zeros((0,), dtype=torch.long).detach().cpu().numpy()
+
+					# 匹配规则：类别一致且欧氏距离小于阈值时，预测和 GT 才允许配对。
+					# 一个预测最多匹配一个 GT，一个 GT 也最多匹配一个预测。
+					gt_points_np = gt_points.detach().cpu().numpy()
+					gt_labels_np = gt_labels.detach().cpu().numpy()
+					pairs: list[tuple[float, int, int]] = []
+					for pred_index in range(decoded_pred_points.shape[0]):
+						for gt_index in range(gt_points_np.shape[0]):
+							if int(decoded_pred_labels[pred_index]) != int(gt_labels_np[gt_index]):
+								continue
+							distance = float(((decoded_pred_points[pred_index] - gt_points_np[gt_index]) ** 2).sum() ** 0.5)
+							if distance <= VAL_DISTANCE_THRESHOLD:
+								pairs.append((distance, pred_index, gt_index))
+
+					pairs.sort(key=lambda item: item[0])
+					matched_pred_indices: set[int] = set()
+					matched_gt_indices: set[int] = set()
+					for _, pred_index, gt_index in pairs:
+						if pred_index in matched_pred_indices or gt_index in matched_gt_indices:
+							continue
+						matched_pred_indices.add(pred_index)
+						matched_gt_indices.add(gt_index)
+
+					val_tp += len(matched_pred_indices)
+					val_fp += int(decoded_pred_points.shape[0]) - len(matched_pred_indices)
+					val_fn += int(gt_points_np.shape[0]) - len(matched_pred_indices)
 
 				batch_size = max(1, len(outputs))
 				loss_dict = {name: value / batch_size for name, value in loss_dict.items()}
@@ -385,21 +437,29 @@ def e2ecr_train(checkpoints_save_dir, logger):
 
 		val_loss = val_running_total_loss / val_valid_steps
 		val_metrics = {name: value / val_valid_steps for name, value in val_running_metrics.items()}
+		val_precision = val_tp / (val_tp + val_fp) if (val_tp + val_fp) > 0 else 0.0
+		val_recall = val_tp / (val_tp + val_fn) if (val_tp + val_fn) > 0 else 0.0
+		val_f1 = 2 * val_precision * val_recall / (val_precision + val_recall) if (val_precision + val_recall) > 0 else 0.0
 		logger.info(
 			f"Epoch {epoch} 验证损失明细: "
 			+ " | ".join(f"{name}={value:.6f}" for name, value in sorted(val_metrics.items()))
 		)
+		logger.info(
+			f"Epoch {epoch} 验证分类感知指标: precision={val_precision:.6f} | recall={val_recall:.6f} | f1={val_f1:.6f}"
+		)
 
 		# 这里只保留“当前最好”的权重文件。
 		# 一旦验证损失刷新，就删除上一份最佳权重，避免目录里累积过多 checkpoint。
-		if val_loss < best_val_loss:
-			previous_best = best_val_loss
+		if val_f1 > best_val_f1:
+			previous_best_f1 = best_val_f1
+			best_val_f1 = val_f1
 			best_val_loss = val_loss
-			checkpoint_path = checkpoints_dir / f"e2ecr_epoch{epoch}_val{best_val_loss:.6f}.pth"
+			checkpoint_path = checkpoints_dir / f"e2ecr_epoch{epoch}_f1{best_val_f1:.6f}.pth"
 			torch.save(
 				{
 					"epoch": epoch,
 					"best_val_loss": best_val_loss,
+					"best_val_f1": best_val_f1,
 					"model_state_dict": model.state_dict(),
 					"optimizer_state_dict": optimizer.state_dict(),
 					"scheduler_state_dict": scheduler.state_dict(),
@@ -411,14 +471,14 @@ def e2ecr_train(checkpoints_save_dir, logger):
 				best_checkpoint_path.unlink()
 			best_checkpoint_path = checkpoint_path
 			logger.info(
-				f"Epoch {epoch} 获得更优验证指标 | val_loss={val_loss:.6f} | 上一最佳={previous_best:.6f}"
+				f"Epoch {epoch} 获得更优验证指标 | val_f1={val_f1:.6f} | 上一最佳={previous_best_f1:.6f} | 对应val_loss={val_loss:.6f}"
 			)
 			logger.info(f"已保留最佳权重: {best_checkpoint_path}")
 		else:
 			logger.info(
-				f"Epoch {epoch} 未刷新最佳验证指标 | val_loss={val_loss:.6f} | best_val_loss={best_val_loss:.6f}"
+				f"Epoch {epoch} 未刷新最佳验证指标 | val_f1={val_f1:.6f} | best_val_f1={best_val_f1:.6f} | val_loss={val_loss:.6f}"
 			)
 
-	logger.info(f"训练完成，最佳验证损失: {best_val_loss:.6f}")
+	logger.info(f"训练完成，最佳验证 F1: {best_val_f1:.6f} | 对应验证损失: {best_val_loss:.6f}")
 	if best_checkpoint_path is not None:
 		logger.info(f"最佳权重文件: {best_checkpoint_path}")

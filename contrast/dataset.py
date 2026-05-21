@@ -112,7 +112,7 @@ class BRCAM2CE2ECRDataset(Dataset):
 		self.image_root = self.data_root / "images"
 		self.gt_root = self.data_root / "gt_custom"
 		self.phase = phase
-		self.crop_size = crop_size
+		self.target_size = crop_size
 		self.split_file = self._resolve_split_file(phase)
 		self.image_names = np.loadtxt(self.split_file, dtype=str).tolist()
 		if isinstance(self.image_names, str):
@@ -135,11 +135,12 @@ class BRCAM2CE2ECRDataset(Dataset):
 		image_np = np.asarray(image, dtype=np.float32) / 255.0
 		gt_dots = np.load(self.gt_root / image_name.replace(".png", "_gt_dots.npy"), allow_pickle=True)
 		gt_dots = self._normalize_gt_dots(gt_dots)
+		points, labels = self._extract_points_and_labels(gt_dots)
 
 		if self.phase == "train":
-			image_np, gt_dots = self._apply_train_transforms(image_np, gt_dots)
+			image_np, points = self._apply_train_transforms(image_np, points)
 
-		points, labels = self._extract_points_and_labels(gt_dots)
+		image_np, points = self._resize_image_and_points(image_np, points)
 		image_tensor = torch.from_numpy(image_np.transpose(2, 0, 1)).float()
 		target = {
 			"points": torch.from_numpy(points).float(),
@@ -174,24 +175,42 @@ class BRCAM2CE2ECRDataset(Dataset):
 			raise ValueError(f"split 文件不存在: {split_file}")
 		return split_file
 
-	def _apply_train_transforms(self, image_np: np.ndarray, gt_dots: np.ndarray):
+	def _apply_train_transforms(self, image_np: np.ndarray, points: np.ndarray):
+		height, width = image_np.shape[:2]
 		if random.random() < 0.5:
 			image_np = image_np[:, ::-1].copy()
-			gt_dots = gt_dots[:, ::-1].copy()
+			if points.shape[0] > 0:
+				points = points.copy()
+				points[:, 0] = (width - 1) - points[:, 0]
 		if random.random() < 0.5:
 			image_np = image_np[::-1, :].copy()
-			gt_dots = gt_dots[::-1, :].copy()
+			if points.shape[0] > 0:
+				points = points.copy()
+				points[:, 1] = (height - 1) - points[:, 1]
 
-		height, width = image_np.shape[:2]
-		crop_height = min(self.crop_size, height)
-		crop_width = min(self.crop_size, width)
-		if crop_height < height or crop_width < width:
-			top = random.randint(0, height - crop_height)
-			left = random.randint(0, width - crop_width)
-			image_np = image_np[top : top + crop_height, left : left + crop_width]
-			gt_dots = gt_dots[top : top + crop_height, left : left + crop_width]
+		return image_np, points
 
-		return image_np, gt_dots
+	def _resize_image_and_points(self, image_np: np.ndarray, points: np.ndarray):
+		original_height, original_width = image_np.shape[:2]
+		target_height = self.target_size
+		target_width = self.target_size
+
+		image_tensor = torch.from_numpy(image_np.transpose(2, 0, 1)).float()
+		image_tensor = F.resize(
+			image_tensor,
+			size=[target_height, target_width],
+			interpolation=F.InterpolationMode.BILINEAR,
+			antialias=True,
+		)
+		image_np = image_tensor.permute(1, 2, 0).numpy()
+
+		if points.shape[0] == 0:
+			return image_np, points.astype(np.float32)
+
+		scaled_points = points.astype(np.float32).copy()
+		scaled_points[:, 0] = scaled_points[:, 0] * (target_width / original_width)
+		scaled_points[:, 1] = scaled_points[:, 1] * (target_height / original_height)
+		return image_np, scaled_points
 
 	def _extract_points_and_labels(self, gt_dots: np.ndarray):
 		points: list[list[float]] = []
