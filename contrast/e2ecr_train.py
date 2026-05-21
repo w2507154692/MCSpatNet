@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from E2ECR import E2ECRConfig, build_e2ecr
-from e2ecr_dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_num_classes
+from dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_e2ecr_num_classes
 
 
 DATA_ROOT = Path("data") / "BRCA-M2C"
@@ -63,7 +63,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 		collate_fn=e2ecr_collate_fn,
 	)
 
-	model_config = E2ECRConfig(num_classes=get_num_classes(DATASET_TYPE))
+	model_config = E2ECRConfig(num_classes=get_e2ecr_num_classes(DATASET_TYPE))
 	model = build_e2ecr(model_config).to(DEVICE)
 	optimizer = AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 	scheduler = StepLR(optimizer, step_size=LR_STEP_SIZE, gamma=LR_GAMMA)
@@ -74,7 +74,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 	logger.info(f"训练设备: {DEVICE}")
 	logger.info(f"训练集样本数: {len(train_dataset)} | 验证集样本数: {len(val_dataset)}")
 	logger.info(f"数据集类型: {DATASET_TYPE} | 数据集路径: {DATA_ROOT}")
-	logger.info(f"类别数: {get_num_classes(DATASET_TYPE)}")
+	logger.info(f"类别数: {get_e2ecr_num_classes(DATASET_TYPE)}")
 	logger.info(
 		f"训练配置: epochs={NUM_EPOCHS}, batch_size={BATCH_SIZE}, lr={LEARNING_RATE}, crop_size={TRAIN_CROP_SIZE}"
 	)

@@ -11,7 +11,7 @@ from torchvision.transforms import functional as F
 from tqdm.auto import tqdm
 
 from E2ECR import E2ECRConfig, build_e2ecr
-from e2ecr_dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_num_classes
+from dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_e2ecr_num_classes
 
 
 DATA_ROOT = Path("data") / "BRCA-M2C"
@@ -57,7 +57,7 @@ def e2ecr_test(out_dir, pth_file_path):
 	model.eval()
 
 	summary = {"num_images": len(test_dataset), "num_gt_points": 0, "num_pred_points": 0, "tp": 0, "fp": 0, "fn": 0}
-	per_class_summary = {class_index: {"tp": 0, "fp": 0, "fn": 0} for class_index in range(get_num_classes(DATASET_TYPE))}
+	per_class_summary = {class_index: {"tp": 0, "fp": 0, "fn": 0} for class_index in range(get_e2ecr_num_classes(DATASET_TYPE))}
 	detection_summary = {"tp": 0, "fp": 0, "fn": 0}
 	per_image_lines: list[str] = []
 
@@ -84,7 +84,7 @@ def e2ecr_test(out_dir, pth_file_path):
 					ignore_class=True,
 				)
 
-				for class_index in range(get_num_classes(DATASET_TYPE)):
+				for class_index in range(get_e2ecr_num_classes(DATASET_TYPE)):
 					class_mask_pred = pred_labels == class_index
 					class_mask_gt = gt_labels == class_index
 					class_tp, class_fp, class_fn = _match_points(
@@ -212,7 +212,7 @@ def e2ecr_test(out_dir, pth_file_path):
 def _load_model_config(checkpoint):
 	model_config_dict = checkpoint.get("model_config")
 	if model_config_dict is None:
-		return E2ECRConfig(num_classes=get_num_classes(DATASET_TYPE))
+		return E2ECRConfig(num_classes=get_e2ecr_num_classes(DATASET_TYPE))
 	return E2ECRConfig(**model_config_dict)
 
 
