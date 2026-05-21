@@ -42,6 +42,7 @@ LAMBDA_REG = 1e-3
 INFERENCE_SCORE_THRESHOLD = 0.4
 INFERENCE_DISTANCE_THRESHOLD = 12.0
 INFERENCE_NMS_KERNEL_SIZE = 5
+INFERENCE_POINT_NMS_RADIUS = 8.0
 CHECKPOINT_SAVE_INTERVAL = 25
 
 def e2ecr_train(checkpoints_save_dir, logger):
@@ -437,8 +438,30 @@ def e2ecr_train(checkpoints_save_dir, logger):
 					keep_mask = keep_mask.reshape(-1)
 
 					if keep_mask.sum().item() > 0:
-						decoded_pred_points = pred_points[keep_mask].detach().cpu().numpy()
-						decoded_pred_labels = decoded_pred_labels[keep_mask].detach().cpu().numpy()
+						decoded_pred_points = pred_points[keep_mask]
+						decoded_pred_labels = decoded_pred_labels[keep_mask]
+						decoded_final_scores = decoded_final_scores[keep_mask]
+
+						# 第二阶段在回归后的最终点坐标上再做一次半径 NMS。
+						# 这样可以继续压掉那些虽然来自不同网格位置、但最终落在同一细胞附近的重复点。
+						remaining_indices = torch.argsort(decoded_final_scores, descending=True)
+						kept_indices: list[torch.Tensor] = []
+						while remaining_indices.numel() > 0:
+							current_index = remaining_indices[0]
+							kept_indices.append(current_index)
+							if remaining_indices.numel() == 1:
+								break
+
+							other_indices = remaining_indices[1:]
+							current_point = decoded_pred_points[current_index].unsqueeze(0)
+							distances = torch.norm(decoded_pred_points[other_indices] - current_point, dim=1)
+							same_class_mask = decoded_pred_labels[other_indices] == decoded_pred_labels[current_index]
+							keep_other_mask = (distances > INFERENCE_POINT_NMS_RADIUS) | (~same_class_mask)
+							remaining_indices = other_indices[keep_other_mask]
+
+						kept_indices_tensor = torch.stack(kept_indices)
+						decoded_pred_points = decoded_pred_points[kept_indices_tensor].detach().cpu().numpy()
+						decoded_pred_labels = decoded_pred_labels[kept_indices_tensor].detach().cpu().numpy()
 					else:
 						decoded_pred_points = gt_points.new_zeros((0, 2)).detach().cpu().numpy()
 						decoded_pred_labels = gt_labels.new_zeros((0,), dtype=torch.long).detach().cpu().numpy()

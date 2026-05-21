@@ -25,6 +25,7 @@ NUM_WORKERS = 0 if platform.system() == "Windows" else 4
 DISTANCE_THRESHOLD = 12.0
 INFERENCE_SCORE_THRESHOLD = 0.4
 INFERENCE_NMS_KERNEL_SIZE = 5
+INFERENCE_POINT_NMS_RADIUS = 8.0
 RESULTS_FILE_NAME = "test_results.txt"
 VISUALIZATION_DIR_NAME = "visualizations"
 PREDICTION_DIR_NAME = "predictions"
@@ -231,8 +232,8 @@ def _load_model_config(checkpoint):
 
 def _decode_prediction_maps(output, model_config):
 	# 将模型输出的三张预测图恢复成点集合。
-	# 这里先按最终置信度阈值筛选候选，再做一次与验证阶段一致的轻量局部极大值抑制，
-	# 以降低同一个真实细胞附近出现多个重复预测的问题。
+	# 这里先在分数图上做一次轻量局部极大值预筛，再在最终点坐标上做半径 NMS，
+	# 这样既能保留较低复杂度，也能抑制“不同像素位置回归到同一细胞附近”的粘连预测。
 	reg_map = output["reg"]
 	det_map = output["det"]
 	cls_map = output["cls"]
@@ -275,7 +276,40 @@ def _decode_prediction_maps(output, model_config):
 	pred_points = pred_points[keep_mask]
 	pred_labels = pred_labels[keep_mask]
 	final_scores = final_scores[keep_mask]
+	pred_points, pred_labels, final_scores = _apply_point_nms(
+		pred_points,
+		pred_labels,
+		final_scores,
+		radius=INFERENCE_POINT_NMS_RADIUS,
+	)
 	return pred_points, pred_labels, final_scores
+
+
+def _apply_point_nms(pred_points, pred_labels, pred_scores, radius):
+	# 点级 NMS 直接作用在回归后的最终点坐标上，而不是像素分数图上。
+	# 这样能更有效地去掉“分数图上分开、但回归后挤到一起”的重复预测。
+	if pred_points.shape[0] <= 1:
+		return pred_points, pred_labels, pred_scores
+
+	remaining_indices = torch.argsort(pred_scores, descending=True)
+	kept_indices: list[torch.Tensor] = []
+	while remaining_indices.numel() > 0:
+		current_index = remaining_indices[0]
+		kept_indices.append(current_index)
+		if remaining_indices.numel() == 1:
+			break
+
+		other_indices = remaining_indices[1:]
+		current_point = pred_points[current_index].unsqueeze(0)
+		distances = torch.norm(pred_points[other_indices] - current_point, dim=1)
+		same_class_mask = pred_labels[other_indices] == pred_labels[current_index]
+
+		# 只有“同类别且距离过近”的点才会被压制，避免误删相邻但类别不同的细胞。
+		keep_other_mask = (distances > radius) | (~same_class_mask)
+		remaining_indices = other_indices[keep_other_mask]
+
+	kept_indices_tensor = torch.stack(kept_indices)
+	return pred_points[kept_indices_tensor], pred_labels[kept_indices_tensor], pred_scores[kept_indices_tensor]
 
 
 def _match_points(pred_points, pred_labels, gt_points, gt_labels, distance_threshold, ignore_class):
