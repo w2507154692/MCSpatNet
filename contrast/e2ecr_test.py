@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import functional as F
 from tqdm.auto import tqdm
 
-from E2ECR import E2ECRConfig, build_e2ecr
+from e2ecr import E2ECRConfig, build_e2ecr
 from dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_e2ecr_num_classes
 
 
@@ -70,9 +70,10 @@ def e2ecr_test(out_dir, pth_file_path):
 			for image_tensor, target, output in zip(images, targets, outputs):
 				gt_points = target["points"].cpu().numpy()
 				gt_labels = target["labels"].cpu().numpy()
-				pred_points = output["points"].detach().cpu().numpy()
-				pred_labels = output["labels"].detach().cpu().numpy()
-				pred_scores = output["scores"].detach().cpu().numpy()
+				pred_points, pred_labels, pred_scores = _decode_prediction_maps(output, model_config)
+				pred_points = pred_points.detach().cpu().numpy()
+				pred_labels = pred_labels.detach().cpu().numpy()
+				pred_scores = pred_scores.detach().cpu().numpy()
 
 				tp, fp, fn = _match_points(pred_points, pred_labels, gt_points, gt_labels, DISTANCE_THRESHOLD, ignore_class=False)
 				detection_tp, detection_fp, detection_fn = _match_points(
@@ -214,6 +215,60 @@ def _load_model_config(checkpoint):
 	if model_config_dict is None:
 		return E2ECRConfig(num_classes=get_e2ecr_num_classes(DATASET_TYPE))
 	return E2ECRConfig(**model_config_dict)
+
+
+def _decode_prediction_maps(output, model_config):
+	reg_map = output["reg"]
+	det_map = output["det"]
+	cls_map = output["cls"]
+	image_height, image_width = det_map.shape[-2], det_map.shape[-1]
+
+	reg_logits = reg_map.permute(1, 2, 0).reshape(-1, 2)
+	det_logits = det_map.permute(1, 2, 0).reshape(-1, 2)
+	cls_logits = cls_map.permute(1, 2, 0).reshape(-1, model_config.num_classes)
+
+	y_coords = torch.arange(image_height, device=reg_map.device, dtype=reg_logits.dtype)
+	x_coords = torch.arange(image_width, device=reg_map.device, dtype=reg_logits.dtype)
+	y_grid, x_grid = torch.meshgrid(y_coords, x_coords, indexing="ij")
+	base_points = torch.stack([x_grid, y_grid], dim=-1).reshape(-1, 2)
+	pred_points = base_points + reg_logits
+
+	det_probs = torch.softmax(det_logits, dim=1)
+	obj_scores = det_probs[:, 1]
+	cls_probs = torch.softmax(cls_logits, dim=1)
+	cls_scores, pred_labels = torch.max(cls_probs, dim=1)
+	final_scores = obj_scores * cls_scores
+
+	keep_mask = (obj_scores >= model_config.inference_obj_threshold) & (
+		final_scores >= model_config.inference_score_threshold
+	)
+	if keep_mask.sum().item() == 0:
+		return (
+			torch.zeros((0, 2), dtype=pred_points.dtype, device=pred_points.device),
+			torch.zeros((0,), dtype=torch.long, device=pred_points.device),
+			torch.zeros((0,), dtype=final_scores.dtype, device=final_scores.device),
+		)
+
+	pred_points = pred_points[keep_mask]
+	pred_labels = pred_labels[keep_mask]
+	final_scores = final_scores[keep_mask]
+
+	sorted_indices = torch.argsort(final_scores, descending=True)
+	selected_indices = []
+	for candidate_index in sorted_indices.tolist():
+		candidate_point = pred_points[candidate_index]
+		should_keep = True
+		for kept_index in selected_indices:
+			if torch.norm(candidate_point - pred_points[kept_index], p=2).item() <= model_config.nms_radius:
+				should_keep = False
+				break
+		if should_keep:
+			selected_indices.append(candidate_index)
+			if len(selected_indices) >= model_config.max_predictions_per_image:
+				break
+
+	selected_indices = torch.as_tensor(selected_indices, dtype=torch.long, device=pred_points.device)
+	return pred_points[selected_indices], pred_labels[selected_indices], final_scores[selected_indices]
 
 
 def _match_points(pred_points, pred_labels, gt_points, gt_labels, distance_threshold, ignore_class):
