@@ -180,17 +180,54 @@ class BRCAM2CE2ECRDataset(Dataset):
 	def _apply_train_transforms(self, image_np: np.ndarray, points: np.ndarray):
 		height, width = image_np.shape[:2]
 		if random.random() < 0.5:
-			image_np = image_np[:, ::-1].copy()
+			image_np = image_np[:, ::-1].copy()		# 左右翻转
 			if points.shape[0] > 0:
 				points = points.copy()
 				points[:, 0] = (width - 1) - points[:, 0]
 		if random.random() < 0.5:
-			image_np = image_np[::-1, :].copy()
+			image_np = image_np[::-1, :].copy()		# 上下翻转
 			if points.shape[0] > 0:
 				points = points.copy()
 				points[:, 1] = (height - 1) - points[:, 1]
 
-		return image_np, points
+		# 90 度整数倍旋转对点标注最稳妥：不会引入任意角度插值误差，
+		# 但能显著增加细胞排列方向的多样性。
+		rotation_k = random.randint(0, 3)
+		if rotation_k == 1:
+			image_np = np.rot90(image_np, k=1).copy()
+			if points.shape[0] > 0:
+				points = points.copy()
+				x_coords = points[:, 0].copy()
+				y_coords = points[:, 1].copy()
+				points[:, 0] = y_coords
+				points[:, 1] = (width - 1) - x_coords
+		elif rotation_k == 2:
+			image_np = np.rot90(image_np, k=2).copy()
+			if points.shape[0] > 0:
+				points = points.copy()
+				points[:, 0] = (width - 1) - points[:, 0]
+				points[:, 1] = (height - 1) - points[:, 1]
+		elif rotation_k == 3:
+			image_np = np.rot90(image_np, k=3).copy()
+			if points.shape[0] > 0:
+				points = points.copy()
+				x_coords = points[:, 0].copy()
+				y_coords = points[:, 1].copy()
+				points[:, 0] = (height - 1) - y_coords
+				points[:, 1] = x_coords
+
+		# 颜色扰动用于模拟不同切片和染色批次之间的亮度、对比度和色偏变化。
+		# 扰动范围控制得较小，避免把病理图像的结构信息破坏得过于严重。
+		if random.random() < 0.8:
+			brightness_factor = random.uniform(0.9, 1.1)
+			contrast_factor = random.uniform(0.9, 1.1)
+			channel_scale = np.random.uniform(0.95, 1.05, size=(1, 1, image_np.shape[2])).astype(np.float32)
+			image_mean = image_np.mean(axis=(0, 1), keepdims=True)
+			image_np = np.clip(image_np * brightness_factor, 0.0, 1.0)
+			image_np = np.clip((image_np - image_mean) * contrast_factor + image_mean, 0.0, 1.0)
+			image_np = np.clip(image_np * channel_scale, 0.0, 1.0)
+
+		return np.ascontiguousarray(image_np), points.astype(np.float32, copy=False)
 
 	def _resize_image_and_points(self, image_np: np.ndarray, points: np.ndarray):
 		original_height, original_width = image_np.shape[:2]
@@ -250,6 +287,7 @@ def get_num_classes(classes_csv: str | Path) -> int:
 
 def build_e2ecr_dataset(dataset_type: str, data_root: str | Path, phase: str, crop_size: int = 384):
 	dataset_type_normalized = dataset_type.strip().lower()
+	phase_normalized = phase.strip().lower()
 	dataset_registry = {
 		"brca-m2c": BRCAM2CE2ECRDataset,
 	}
@@ -258,7 +296,13 @@ def build_e2ecr_dataset(dataset_type: str, data_root: str | Path, phase: str, cr
 			f"不支持的数据集类型: {dataset_type}。当前支持: {', '.join(sorted(dataset_registry.keys()))}"
 		)
 	dataset_cls = dataset_registry[dataset_type_normalized]
-	return dataset_cls(data_root=data_root, phase=phase, crop_size=crop_size)
+	# 训练集打开增强，验证和测试保持确定性，避免评估口径漂移。
+	return dataset_cls(
+		data_root=data_root,
+		phase=phase_normalized,
+		crop_size=crop_size,
+		transform=(phase_normalized == "train"),
+	)
 
 
 def get_e2ecr_num_classes(dataset_type: str) -> int:
