@@ -107,12 +107,14 @@ class BRCAM2CE2ECRDataset(Dataset):
 		data_root: str | Path,
 		phase: str,
 		crop_size: int = 384,
+		transform: bool = False
 	) -> None:
 		self.data_root = Path(data_root)
 		self.image_root = self.data_root / "images"
 		self.gt_root = self.data_root / "gt_custom"
 		self.phase = phase
 		self.target_size = crop_size
+		self.transform = transform
 		self.split_file = self._resolve_split_file(phase)
 		self.image_names = np.loadtxt(self.split_file, dtype=str).tolist()
 		if isinstance(self.image_names, str):
@@ -137,7 +139,7 @@ class BRCAM2CE2ECRDataset(Dataset):
 		gt_dots = self._normalize_gt_dots(gt_dots)
 		points, labels = self._extract_points_and_labels(gt_dots)
 
-		if self.phase == "train":
+		if self.phase == "train" and self.transform:
 			image_np, points = self._apply_train_transforms(image_np, points)
 
 		image_np, points = self._resize_image_and_points(image_np, points)
