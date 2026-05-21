@@ -1,3 +1,6 @@
+
+
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,7 +21,7 @@ from utils import (
 )
 
 
-DATA_ROOT = Path("data") / "CoNSeP_patch"
+DATA_ROOT = Path("data") / "CoNSeP"
 ANNOTATIONS_CSV = DATA_ROOT / "annotations" / "boxes.csv"
 CLASSES_CSV = DATA_ROOT / "metadata" / "classes.csv"
 SPLIT = 'test'		# 使用的测试集
@@ -26,8 +29,8 @@ SPLIT = 'test'		# 使用的测试集
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TEST_BATCH_SIZE = 2
 NUM_WORKERS = 0 if torch.platform.system() == "Windows" else 16
-SCORE_THRESHOLD = 0.15
-IOU_THRESHOLD = 0.3
+SCORE_THRESHOLD = 0.05
+IOU_THRESHOLD = 0.5
 RESULTS_FILE_NAME = "test_results.txt"
 VISUALIZATION_DIR_NAME = "visualizations"
 
@@ -56,8 +59,6 @@ def faster_rcnn_test(out_dir, pth_file_path):
 	model.load_state_dict(checkpoint["model_state_dict"])
 	model.to(DEVICE)
 	model.eval()
-	class_ids = sorted(label_id_to_name.keys())
-	foreground_class_ids = [class_id for class_id in class_ids if class_id != 0]
 
 	summary = {
 		"num_images": len(test_dataset),
@@ -68,19 +69,6 @@ def faster_rcnn_test(out_dir, pth_file_path):
 		"fn": 0,
 		"score_sum": 0.0,
 		"score_count": 0,
-	}
-	per_class_summary = {
-		class_id: {
-			"tp": 0,
-			"fp": 0,
-			"fn": 0,
-		}
-		for class_id in class_ids
-	}
-	detection_summary = {
-		"tp": 0,
-		"fp": 0,
-		"fn": 0,
 	}
 	per_image_lines: list[str] = []
 
@@ -116,30 +104,6 @@ def faster_rcnn_test(out_dir, pth_file_path):
 					iou_threshold=IOU_THRESHOLD,
 				)
 
-				for class_id in class_ids:
-					pred_mask = pred_labels == class_id
-					gt_mask = gt_labels == class_id
-					class_tp, class_fp, class_fn = match_detection_counts(
-						pred_boxes=pred_boxes[pred_mask],
-						pred_labels=pred_labels[pred_mask],
-						gt_boxes=gt_boxes[gt_mask],
-						gt_labels=gt_labels[gt_mask],
-						iou_threshold=IOU_THRESHOLD,
-					)
-					per_class_summary[class_id]["tp"] += class_tp
-					per_class_summary[class_id]["fp"] += class_fp
-					per_class_summary[class_id]["fn"] += class_fn
-
-				detection_pred_labels = torch.ones((pred_boxes.shape[0],), dtype=torch.int64)
-				detection_gt_labels = torch.ones((gt_boxes.shape[0],), dtype=torch.int64)
-				detection_tp, detection_fp, detection_fn = match_detection_counts(
-					pred_boxes=pred_boxes,
-					pred_labels=detection_pred_labels,
-					gt_boxes=gt_boxes,
-					gt_labels=detection_gt_labels,
-					iou_threshold=IOU_THRESHOLD,
-				)
-
 				visualization_path = visualization_dir / f"{Path(image_path).stem}.png"
 				visualize_detection_result(
 					image_tensor=image_tensor,
@@ -157,9 +121,6 @@ def faster_rcnn_test(out_dir, pth_file_path):
 				summary["tp"] += tp
 				summary["fp"] += fp
 				summary["fn"] += fn
-				detection_summary["tp"] += detection_tp
-				detection_summary["fp"] += detection_fp
-				detection_summary["fn"] += detection_fn
 				summary["score_sum"] += float(pred_scores.sum().item())
 				summary["score_count"] += int(pred_scores.numel())
 
@@ -172,37 +133,9 @@ def faster_rcnn_test(out_dir, pth_file_path):
 				)
 
 	precision, recall, f1 = compute_precision_recall_f1(summary["tp"], summary["fp"], summary["fn"])
-	detection_precision, detection_recall, detection_f1 = compute_precision_recall_f1(
-		detection_summary["tp"],
-		detection_summary["fp"],
-		detection_summary["fn"],
-	)
 	average_score = (
 		summary["score_sum"] / summary["score_count"] if summary["score_count"] > 0 else 0.0
 	)
-	per_class_lines: list[str] = []
-	per_class_f1_values: list[float] = []
-	for class_id in foreground_class_ids:
-		class_name = label_id_to_name.get(class_id, str(class_id))
-		class_summary = per_class_summary[class_id]
-		class_precision, class_recall, class_f1 = compute_precision_recall_f1(
-			class_summary["tp"],
-			class_summary["fp"],
-			class_summary["fn"],
-		)
-		per_class_f1_values.append(class_f1)
-		per_class_lines.extend(
-			[
-				f"class={class_name} (label_id={class_id})",
-				f"  tp: {class_summary['tp']}",
-				f"  fp: {class_summary['fp']}",
-				f"  fn: {class_summary['fn']}",
-				f"  precision: {class_precision:.6f}",
-				f"  recall: {class_recall:.6f}",
-				f"  f1: {class_f1:.6f}",
-			]
-		)
-	mean_class_f1 = sum(per_class_f1_values) / len(per_class_f1_values) if per_class_f1_values else 0.0
 
 	lines = [
 		f"checkpoint_path: {pth_file_path}",
@@ -213,34 +146,16 @@ def faster_rcnn_test(out_dir, pth_file_path):
 		f"num_images: {summary['num_images']}",
 		f"num_gt_boxes: {summary['num_gt_boxes']}",
 		f"num_pred_boxes: {summary['num_pred_boxes']}",
-		"classification_aware_results:",
 		f"tp: {summary['tp']}",
 		f"fp: {summary['fp']}",
 		f"fn: {summary['fn']}",
 		f"precision: {precision:.6f}",
 		f"recall: {recall:.6f}",
 		f"f1: {f1:.6f}",
-		f"mean_class_f1_foreground_only: {mean_class_f1:.6f}",
+		f"average_score: {average_score:.6f}",
 		"",
-		"per_class_results:",
+		"per_image_results:",
 	]
-	lines.extend(per_class_lines)
-	lines.extend(
-		[
-			"",
-			"detection_results_ignore_class:",
-			f"tp: {detection_summary['tp']}",
-			f"fp: {detection_summary['fp']}",
-			f"fn: {detection_summary['fn']}",
-			f"precision: {detection_precision:.6f}",
-			f"recall: {detection_recall:.6f}",
-			f"f1: {detection_f1:.6f}",
-			"",
-			f"average_score: {average_score:.6f}",
-			"",
-			"per_image_results:",
-		]
-	)
 	lines.extend(per_image_lines)
 
 	results_file.write_text("\n".join(lines) + "\n", encoding="utf-8")

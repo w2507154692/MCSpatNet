@@ -13,30 +13,29 @@ from dataset import MoNuSACDataset, detection_collate_fn, get_num_classes
 from faster_rcnn import FasterRCNNConfig, build_faster_rcnn
 
 
-DATA_ROOT = Path("data") / "CoNSeP_patch"
+DATA_ROOT = Path("data") / "CoNSeP"
 ANNOTATIONS_CSV = DATA_ROOT / "annotations" / "boxes.csv"
 CLASSES_CSV = DATA_ROOT / "metadata" / "classes.csv"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-NUM_EPOCHS = 300
-BATCH_SIZE = 4
+NUM_EPOCHS = 20
+BATCH_SIZE = 1
 NUM_WORKERS = 0 if torch.platform.system() == "Windows" else 16
-LEARNING_RATE = 0.0005   # 学习率。当前 batch size 很小，检测模型需要更保守的步长。
+LEARNING_RATE = 0.005   # 学习率
 MOMENTUM = 0.9  # 学习率动量
 WEIGHT_DECAY = 0.0005   # 学习率衰减
 LR_STEP_SIZE = 8
 LR_GAMMA = 0.1
 EVAL_INTERVAL_EPOCHS = 1    # 验证周期
 PRINT_FREQ = 10     # 打印频率
-GRAD_CLIP_NORM = 10.0
 
-PRETRAINED_DETECTOR = True
-PRETRAINED_BACKBONE = True
+PRETRAINED_DETECTOR = False
+PRETRAINED_BACKBONE = False
 TRAINABLE_BACKBONE_LAYERS = 5
-MIN_SIZE = 500
-MAX_SIZE = 500
+MIN_SIZE = 1000
+MAX_SIZE = 1000
 BOX_SCORE_THRESH = 0.05
-BOX_NMS_THRESH = 0.3
+BOX_NMS_THRESH = 0.5
 BOX_DETECTIONS_PER_IMG = 300
 RPN_ANCHOR_SIZES = ((8,), (16,), (32,), (64,), (128,))
 RPN_ASPECT_RATIOS = ((0.5, 1.0, 2.0),) * 5
@@ -97,7 +96,6 @@ def faster_rcnn_train(checkpoints_save_dir, logger):
         f"pretrained_detector={PRETRAINED_DETECTOR}, "
         f"pretrained_backbone={PRETRAINED_BACKBONE}",
     )
-    logger.info(f"梯度裁剪阈值: {GRAD_CLIP_NORM}")
 
     for epoch in range(1, NUM_EPOCHS + 1):
         train_loss, train_metrics = _train_one_epoch(
@@ -159,7 +157,6 @@ def _train_one_epoch(model, data_loader, optimizer, device, epoch, logger):
     model.train()
     running_total_loss = 0.0
     running_metrics: dict[str, float] = {}
-    valid_steps = 0
 
     progress_bar = tqdm(data_loader, desc=f"Train Epoch {epoch}", leave=False)
     for step, (images, targets) in enumerate(progress_bar, start=1):
@@ -169,25 +166,15 @@ def _train_one_epoch(model, data_loader, optimizer, device, epoch, logger):
         loss_dict = model(images, targets)
         total_loss = sum(loss for loss in loss_dict.values())
 
-        if not torch.isfinite(total_loss):
-            logger.warning(
-                f"Epoch {epoch} Step {step}/{len(data_loader)} 出现非有限 loss，跳过该 batch: "
-                f"{_format_metrics({name: value.detach().item() for name, value in loss_dict.items()})}"
-            )
-            optimizer.zero_grad()
-            continue
-
         optimizer.zero_grad()
         total_loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), GRAD_CLIP_NORM)
         optimizer.step()
 
-        valid_steps += 1
         running_total_loss += total_loss.item()
         for name, value in loss_dict.items():
             running_metrics[name] = running_metrics.get(name, 0.0) + value.item()
 
-        avg_loss = running_total_loss / valid_steps
+        avg_loss = running_total_loss / step
         progress_bar.set_postfix(loss=f"{avg_loss:.4f}")
 
         if step % PRINT_FREQ == 0 or step == len(data_loader):
@@ -195,11 +182,8 @@ def _train_one_epoch(model, data_loader, optimizer, device, epoch, logger):
                 f"Epoch {epoch} Step {step}/{len(data_loader)} | train_loss={avg_loss:.6f}",
             )
 
-    if valid_steps == 0:
-        raise RuntimeError("整个训练 epoch 都出现了非有限 loss，请检查数据和训练配置")
-
-    averaged_metrics = {name: value / valid_steps for name, value in running_metrics.items()}
-    return running_total_loss / valid_steps, averaged_metrics
+    averaged_metrics = {name: value / len(data_loader) for name, value in running_metrics.items()}
+    return running_total_loss / len(data_loader), averaged_metrics
 
 
 def _validate_one_epoch(model, data_loader, device, epoch, logger):
@@ -208,7 +192,6 @@ def _validate_one_epoch(model, data_loader, device, epoch, logger):
 
     running_total_loss = 0.0
     running_metrics: dict[str, float] = {}
-    valid_steps = 0
 
     with torch.no_grad():
         progress_bar = tqdm(data_loader, desc=f"Val Epoch {epoch}", leave=False)
@@ -219,29 +202,18 @@ def _validate_one_epoch(model, data_loader, device, epoch, logger):
             loss_dict = model(images, targets)
             total_loss = sum(loss for loss in loss_dict.values())
 
-            if not torch.isfinite(total_loss):
-                logger.warning(
-                    f"Epoch {epoch} 验证阶段出现非有限 loss，跳过该 batch: "
-                    f"{_format_metrics({name: value.detach().item() for name, value in loss_dict.items()})}"
-                )
-                continue
-
-            valid_steps += 1
             running_total_loss += total_loss.item()
             for name, value in loss_dict.items():
                 running_metrics[name] = running_metrics.get(name, 0.0) + value.item()
 
-            avg_loss = running_total_loss / valid_steps
+            avg_loss = running_total_loss / step
             progress_bar.set_postfix(loss=f"{avg_loss:.4f}")
 
     if not was_training:
         model.eval()
 
-    if valid_steps == 0:
-        raise RuntimeError("整个验证 epoch 都出现了非有限 loss，请检查数据和训练配置")
-
-    averaged_metrics = {name: value / valid_steps for name, value in running_metrics.items()}
-    val_loss = running_total_loss / valid_steps
+    averaged_metrics = {name: value / len(data_loader) for name, value in running_metrics.items()}
+    val_loss = running_total_loss / len(data_loader)
     logger.info(f"Epoch {epoch}/{NUM_EPOCHS} 验证结束 | val_loss={val_loss:.6f}")
     return val_loss, averaged_metrics
 

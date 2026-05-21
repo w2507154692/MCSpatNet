@@ -7,7 +7,7 @@ import torch
 from datetime import datetime
 
 CHECKPOINTS_ROOT_DIR = './exp'      # 所有训练输出的根目录
-CHECKPOINTS_FOLDER_NAME = 'exp7_faster_rcnn_consep_patch'     # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下
+CHECKPOINTS_FOLDER_NAME = 'exp5_faster_rcnn_consep'     # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下
 SEED = 42
 TYPE = 'faster_rcnn'
 
@@ -88,9 +88,6 @@ def train():
         if TYPE == 'faster_rcnn':
             from faster_rcnn_train import faster_rcnn_train
             faster_rcnn_train(checkpoints_save_dir, logger)
-        elif TYPE == 'e2ecr':
-            from e2ecr_train import e2ecr_train
-            e2ecr_train(checkpoints_save_dir, logger)
         else:
             raise RuntimeError(
                 '实验类型无效！'

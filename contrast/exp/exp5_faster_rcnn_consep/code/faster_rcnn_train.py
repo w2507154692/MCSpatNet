@@ -13,13 +13,13 @@ from dataset import MoNuSACDataset, detection_collate_fn, get_num_classes
 from faster_rcnn import FasterRCNNConfig, build_faster_rcnn
 
 
-DATA_ROOT = Path("data") / "CoNSeP_patch"
+DATA_ROOT = Path("data") / "CoNSeP"
 ANNOTATIONS_CSV = DATA_ROOT / "annotations" / "boxes.csv"
 CLASSES_CSV = DATA_ROOT / "metadata" / "classes.csv"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 NUM_EPOCHS = 300
-BATCH_SIZE = 4
+BATCH_SIZE = 1
 NUM_WORKERS = 0 if torch.platform.system() == "Windows" else 16
 LEARNING_RATE = 0.0005   # 学习率。当前 batch size 很小，检测模型需要更保守的步长。
 MOMENTUM = 0.9  # 学习率动量
@@ -30,14 +30,14 @@ EVAL_INTERVAL_EPOCHS = 1    # 验证周期
 PRINT_FREQ = 10     # 打印频率
 GRAD_CLIP_NORM = 10.0
 
-PRETRAINED_DETECTOR = True
-PRETRAINED_BACKBONE = True
+PRETRAINED_DETECTOR = False
+PRETRAINED_BACKBONE = False
 TRAINABLE_BACKBONE_LAYERS = 5
-MIN_SIZE = 500
-MAX_SIZE = 500
+MIN_SIZE = 1000
+MAX_SIZE = 1000
 BOX_SCORE_THRESH = 0.05
-BOX_NMS_THRESH = 0.3
-BOX_DETECTIONS_PER_IMG = 300
+BOX_NMS_THRESH = 0.5
+BOX_DETECTIONS_PER_IMG = 1000
 RPN_ANCHOR_SIZES = ((8,), (16,), (32,), (64,), (128,))
 RPN_ASPECT_RATIOS = ((0.5, 1.0, 2.0),) * 5
 
