@@ -17,13 +17,13 @@ from dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_e2ecr_num_classes
 
 DATA_ROOT = Path("data") / "BRCA-M2C"
 DATASET_TYPE = "brca-m2c"
-SPLIT = "val"
+SPLIT = "test"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TEST_BATCH_SIZE = 1
 NUM_WORKERS = 0 if platform.system() == "Windows" else 4
 DISTANCE_THRESHOLD = 12.0
-INFERENCE_SCORE_THRESHOLD = 0.3
+INFERENCE_SCORE_THRESHOLD = 0.4
 INFERENCE_NMS_KERNEL_SIZE = 5
 RESULTS_FILE_NAME = "test_results.txt"
 VISUALIZATION_DIR_NAME = "visualizations"
