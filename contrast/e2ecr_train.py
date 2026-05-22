@@ -32,12 +32,16 @@ EVAL_INTERVAL_EPOCHS = 1
 PRINT_FREQ = 10
 GRAD_CLIP_NORM = 5.0
 TRAIN_CROP_SIZE = 384
-MAX_CANDIDATES_NUM = 500
+MIN_CANDIDATES_NUM = 512
+MAX_CANDIDATES_NUM = 1500
+TRAIN_CANDIDATE_MULTIPLIER = 16
+TRAIN_CANDIDATE_SCORE_THRESHOLD = 0.05
 ALPHA = 0.05
 BETA = 0.06
 LAMBDA_REG = 1e-3
 INFERENCE_SCORE_THRESHOLD = 0.3
 VAL_DISTANCE_THRESHOLD = 12.0
+VAL_NMS_KERNEL_SIZE = 5
 
 def e2ecr_train(checkpoints_save_dir, logger):
 	"""E2ECR 训练入口。
@@ -179,14 +183,39 @@ def e2ecr_train(checkpoints_save_dir, logger):
 				# KEY：匈牙利算法
 				# 匈牙利匹配只在存在真实点时才需要执行。
 				# 为了避免在整张图的全部像素上做匹配，这里先按目标性分数选一批候选点。
-				if gt_points.shape[0] > 0:
-					pred_num = obj_scores.shape[0]	# 预测的细胞个数
-					candidate_scores, candidate_indices = torch.topk(
-						obj_scores,
-						k=MAX_CANDIDATES_NUM,
-						largest=True,
-						sorted=False,
-					)
+				# 与之前固定 top-k 不同，这里会优先保留超过阈值的候选，
+				# 如果数量仍不足，再用 top-k 方式补足，尽量让更多 GT 能拿到监督。
+				if gt_points.shape[0] > 0:	
+					min_required_candidates = max(MIN_CANDIDATES_NUM, int(gt_points.shape[0]) * TRAIN_CANDIDATE_MULTIPLIER)		# 一张图的侯选数，至少是真实数的16倍，且必须满足最小要求数量
+					min_required_candidates = min(min_required_candidates, obj_scores.shape[0])	# 候选数不能大于预测数
+					threshold_candidate_indices = torch.nonzero(
+						obj_scores >= TRAIN_CANDIDATE_SCORE_THRESHOLD,
+						as_tuple=False,
+					).squeeze(1)	# 计算大于置信度阈值的预测数
+
+					# 如果这些大于置信度阈值的预测数无法满足候选数的要求，则从所有预测中获取top-k个
+					if threshold_candidate_indices.numel() >= min_required_candidates:
+						candidate_indices = threshold_candidate_indices
+						if candidate_indices.numel() > MAX_CANDIDATES_NUM:
+							threshold_candidate_scores = obj_scores[candidate_indices]
+							_, top_order = torch.topk(
+								threshold_candidate_scores,
+								k=MAX_CANDIDATES_NUM,
+								largest=True,
+								sorted=False,
+							)
+							candidate_indices = candidate_indices[top_order]
+					# 如果满足，则也获取top-k，优中选优
+					else:
+						num_candidates = min(max(MAX_CANDIDATES_NUM, min_required_candidates), obj_scores.shape[0])
+						_, candidate_indices = torch.topk(
+							obj_scores,
+							k=num_candidates,
+							largest=True,
+							sorted=False,
+						)
+
+					candidate_scores = obj_scores[candidate_indices]
 					candidate_points = pred_points[candidate_indices]
 					candidate_cls_probs = cls_probs[candidate_indices]
 					# 代价函数由三部分组成：
@@ -211,9 +240,10 @@ def e2ecr_train(checkpoints_save_dir, logger):
 
 				# 检测损失在全部像素位置上计算。
 				# 这里用 beta 对正负样本重新加权，减轻前景点稀少带来的类别不平衡问题。
+				# 正样本应该更重、背景应该更轻，否则模型会倾向于把所有位置都预测成背景。
 				det_losses = F.cross_entropy(det_logits, det_targets, reduction="none")
-				det_weights = torch.full_like(det_losses, 1.0 - BETA)
-				det_weights[det_targets == 1] = BETA
+				det_weights = torch.full_like(det_losses, BETA)
+				det_weights[det_targets == 1] = 1.0 - BETA
 				loss_det = (det_losses * det_weights).mean()
 
 				# 先累计单张图损失，后面统一对 batch 求平均。
@@ -333,13 +363,34 @@ def e2ecr_train(checkpoints_save_dir, logger):
 					# 验证集也走同样的候选点筛选和匈牙利匹配逻辑，
 					# 这样得到的 val_loss 才能和 train_loss 对齐比较。
 					if gt_points.shape[0] > 0:
-						pred_num = obj_scores.shape[0]	# 预测的细胞个数
-						candidate_scores, candidate_indices = torch.topk(
-							obj_scores,
-							k=MAX_CANDIDATES_NUM,
-							largest=True,
-							sorted=False,
-						)
+						min_required_candidates = max(MIN_CANDIDATES_NUM, int(gt_points.shape[0]) * TRAIN_CANDIDATE_MULTIPLIER)
+						min_required_candidates = min(min_required_candidates, obj_scores.shape[0])
+						threshold_candidate_indices = torch.nonzero(
+							obj_scores >= TRAIN_CANDIDATE_SCORE_THRESHOLD,
+							as_tuple=False,
+						).squeeze(1)
+
+						if threshold_candidate_indices.numel() >= min_required_candidates:
+							candidate_indices = threshold_candidate_indices
+							if candidate_indices.numel() > MAX_CANDIDATES_NUM:
+								threshold_candidate_scores = obj_scores[candidate_indices]
+								_, top_order = torch.topk(
+									threshold_candidate_scores,
+									k=MAX_CANDIDATES_NUM,
+									largest=True,
+									sorted=False,
+								)
+								candidate_indices = candidate_indices[top_order]
+						else:
+							num_candidates = min(max(MAX_CANDIDATES_NUM, min_required_candidates), obj_scores.shape[0])
+							_, candidate_indices = torch.topk(
+								obj_scores,
+								k=num_candidates,
+								largest=True,
+								sorted=False,
+							)
+
+						candidate_scores = obj_scores[candidate_indices]
 						candidate_points = pred_points[candidate_indices]
 						candidate_cls_probs = cls_probs[candidate_indices]
 						distance_matrix = torch.cdist(candidate_points, gt_points, p=2)
@@ -357,8 +408,8 @@ def e2ecr_train(checkpoints_save_dir, logger):
 
 					# 检测损失依旧覆盖整张图，用于衡量背景和前景的整体分离效果。
 					det_losses = F.cross_entropy(det_logits, det_targets, reduction="none")
-					det_weights = torch.full_like(det_losses, 1.0 - BETA)
-					det_weights[det_targets == 1] = BETA
+					det_weights = torch.full_like(det_losses, BETA)
+					det_weights[det_targets == 1] = 1.0 - BETA
 					loss_det = (det_losses * det_weights).mean()
 
 					loss_dict["loss_reg"] = loss_dict["loss_reg"] + loss_reg
@@ -366,13 +417,23 @@ def e2ecr_train(checkpoints_save_dir, logger):
 					loss_dict["loss_cls"] = loss_dict["loss_cls"] + loss_cls
 
 					# 验证时把所有密集预测先转成点，再按置信度阈值筛掉低质量预测。
-					# 这里不再做 NMS，而是直接把保留下来的所有预测与 GT 做一对一距离匹配。
+					# 在进入一对一匹配前，再做一次轻量级局部极大值抑制，
+					# 以降低同一个真实细胞附近出现多个重复预测带来的 FP。
 					decoded_det_probs = torch.softmax(det_logits, dim=1)
 					decoded_obj_scores = decoded_det_probs[:, 1]
 					decoded_cls_probs = torch.softmax(cls_logits, dim=1)
 					decoded_cls_scores, decoded_pred_labels = torch.max(decoded_cls_probs, dim=1)
 					decoded_final_scores = decoded_obj_scores * decoded_cls_scores
-					keep_mask = decoded_final_scores >= INFERENCE_SCORE_THRESHOLD
+					score_map = decoded_final_scores.reshape(image_height, image_width)
+					pooled_score_map = F.max_pool2d(
+						score_map.unsqueeze(0).unsqueeze(0),
+						kernel_size=VAL_NMS_KERNEL_SIZE,
+						stride=1,
+						padding=VAL_NMS_KERNEL_SIZE // 2,
+					).squeeze(0).squeeze(0)
+					peak_mask = torch.isclose(score_map, pooled_score_map)
+					keep_mask = (score_map >= INFERENCE_SCORE_THRESHOLD) & peak_mask
+					keep_mask = keep_mask.reshape(-1)
 
 					if keep_mask.sum().item() > 0:
 						decoded_pred_points = pred_points[keep_mask].detach().cpu().numpy()
