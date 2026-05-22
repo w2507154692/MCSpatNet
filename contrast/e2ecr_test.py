@@ -21,7 +21,8 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TEST_BATCH_SIZE = 1
 NUM_WORKERS = 0 if platform.system() == "Windows" else 4
 DISTANCE_THRESHOLD = 12.0
-INFERENCE_SCORE_THRESHOLD = 0.3
+INFERENCE_SCORE_THRESHOLD = 0.4
+INFERENCE_NMS_KERNEL_SIZE = 5
 RESULTS_FILE_NAME = "test_results.txt"
 VISUALIZATION_DIR_NAME = "visualizations"
 PREDICTION_DIR_NAME = "predictions"
@@ -228,7 +229,8 @@ def _load_model_config(checkpoint):
 
 def _decode_prediction_maps(output, model_config):
 	# 将模型输出的三张预测图恢复成点集合。
-	# 这里不做 NMS，只按最终置信度阈值筛选所有候选预测。
+	# 这里先按最终置信度阈值筛选候选，再做一次与验证阶段一致的轻量局部极大值抑制，
+	# 以降低同一个真实细胞附近出现多个重复预测的问题。
 	reg_map = output["reg"]
 	det_map = output["det"]
 	cls_map = output["cls"]
@@ -250,7 +252,17 @@ def _decode_prediction_maps(output, model_config):
 	cls_scores, pred_labels = torch.max(cls_probs, dim=1)
 	final_scores = obj_scores * cls_scores
 
-	keep_mask = final_scores >= INFERENCE_SCORE_THRESHOLD
+	# 将最终分数恢复成二维分数图，并通过 max-pooling 保留局部峰值点。
+	score_map = final_scores.reshape(image_height, image_width)
+	pooled_score_map = F.max_pool2d(
+		score_map.unsqueeze(0).unsqueeze(0),
+		kernel_size=INFERENCE_NMS_KERNEL_SIZE,
+		stride=1,
+		padding=INFERENCE_NMS_KERNEL_SIZE // 2,
+	).squeeze(0).squeeze(0)
+	peak_mask = torch.isclose(score_map, pooled_score_map)
+	keep_mask = (score_map >= INFERENCE_SCORE_THRESHOLD) & peak_mask
+	keep_mask = keep_mask.reshape(-1)
 	if keep_mask.sum().item() == 0:
 		return (
 			torch.zeros((0, 2), dtype=pred_points.dtype, device=pred_points.device),

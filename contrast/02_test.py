@@ -9,7 +9,7 @@ CHECKPOINTS_FOLDER_NAME = 'exp11_e2ecr_brcam2c'
 EVAL_ROOT_DIR = './exp'
 EPOCH = 150
 TYPE = 'e2ecr'
-SUFFIX = '_val_score_threshold_0.3'   # 后缀，进行额外补充，默认为空
+SUFFIX = '_val_score_threshold_0.4'   # 后缀，进行额外补充，默认为空
 
 # 备份代码到实验目录下
 def backup_python_files(experiment_dir):
