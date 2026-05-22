@@ -6,8 +6,9 @@ import platform
 import numpy as np
 from PIL import ImageDraw
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torchvision.transforms import functional as F
+from torchvision.transforms import functional as TF
 from tqdm.auto import tqdm
 
 from e2ecr import E2ECRConfig, build_e2ecr
@@ -21,7 +22,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TEST_BATCH_SIZE = 1
 NUM_WORKERS = 0 if platform.system() == "Windows" else 4
 DISTANCE_THRESHOLD = 12.0
-INFERENCE_SCORE_THRESHOLD = 0.4
+INFERENCE_SCORE_THRESHOLD = 0.6
 INFERENCE_NMS_KERNEL_SIZE = 5
 RESULTS_FILE_NAME = "test_results.txt"
 VISUALIZATION_DIR_NAME = "visualizations"
@@ -45,7 +46,7 @@ def e2ecr_test(out_dir, pth_file_path):
 	test_dataset = build_e2ecr_dataset(
 		dataset_type=DATASET_TYPE,
 		data_root=DATA_ROOT,
-		phase="val",
+		phase="test",
 	)
 	test_loader = DataLoader(
 		test_dataset,
@@ -319,12 +320,12 @@ def _compute_precision_recall_f1(tp, fp, fn):
 
 def _visualize_points(image_tensor, gt_save_path, pred_save_path, gt_points, gt_labels, pred_points, pred_labels, pred_scores):
 	# GT 和预测分成两张图保存，便于分别观察标注和模型输出。
-	gt_image = F.to_pil_image(image_tensor)
+	gt_image = TF.to_pil_image(image_tensor)
 	gt_draw = ImageDraw.Draw(gt_image)
 	for point, label in zip(gt_points.tolist(), gt_labels.tolist()):
 		_draw_prediction_square(gt_draw, point, PREDICTION_COLORS[int(label)])
 
-	pred_image = F.to_pil_image(image_tensor)
+	pred_image = TF.to_pil_image(image_tensor)
 	pred_draw = ImageDraw.Draw(pred_image)
 	for point, label in zip(pred_points.tolist(), pred_labels.tolist()):
 		_draw_prediction_square(pred_draw, point, PREDICTION_COLORS[int(label)])
