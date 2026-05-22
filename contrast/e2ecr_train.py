@@ -20,7 +20,7 @@ DATA_ROOT = Path("data") / "BRCA-M2C"
 DATASET_TYPE = "brca-m2c"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-NUM_EPOCHS = 300
+NUM_EPOCHS = 150
 BATCH_SIZE = 12
 VAL_BATCH_SIZE = 4
 NUM_WORKERS = 0 if platform.system() == "Windows" else 8
@@ -39,9 +39,9 @@ TRAIN_CANDIDATE_SCORE_THRESHOLD = 0.05
 ALPHA = 0.05
 BETA = 0.06
 LAMBDA_REG = 1e-3
-INFERENCE_SCORE_THRESHOLD = 0.3
-VAL_DISTANCE_THRESHOLD = 12.0
-VAL_NMS_KERNEL_SIZE = 5
+INFERENCE_SCORE_THRESHOLD = 0.6
+INFERENCE_DISTANCE_THRESHOLD = 12.0
+INFERENCE_NMS_KERNEL_SIZE = 5
 
 def e2ecr_train(checkpoints_save_dir, logger):
 	"""E2ECR 训练入口。
@@ -427,9 +427,9 @@ def e2ecr_train(checkpoints_save_dir, logger):
 					score_map = decoded_final_scores.reshape(image_height, image_width)
 					pooled_score_map = F.max_pool2d(
 						score_map.unsqueeze(0).unsqueeze(0),
-						kernel_size=VAL_NMS_KERNEL_SIZE,
+						kernel_size=INFERENCE_NMS_KERNEL_SIZE,
 						stride=1,
-						padding=VAL_NMS_KERNEL_SIZE // 2,
+						padding=INFERENCE_NMS_KERNEL_SIZE // 2,
 					).squeeze(0).squeeze(0)
 					peak_mask = torch.isclose(score_map, pooled_score_map)
 					keep_mask = (score_map >= INFERENCE_SCORE_THRESHOLD) & peak_mask
@@ -452,7 +452,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 							if int(decoded_pred_labels[pred_index]) != int(gt_labels_np[gt_index]):
 								continue
 							distance = float(((decoded_pred_points[pred_index] - gt_points_np[gt_index]) ** 2).sum() ** 0.5)
-							if distance <= VAL_DISTANCE_THRESHOLD:
+							if distance <= INFERENCE_DISTANCE_THRESHOLD:
 								pairs.append((distance, pred_index, gt_index))
 
 					pairs.sort(key=lambda item: item[0])
