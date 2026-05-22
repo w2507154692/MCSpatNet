@@ -27,9 +27,6 @@ VISUALIZATION_DIR_NAME = "visualizations"
 PREDICTION_DIR_NAME = "predictions"
 CLASS_NAMES = ["inflammatory", "epithelial", "stromal"]
 CLASS_COLORS = ["lime", "orange", "cyan"]
-PREDICTION_COLORS = ["blue", "red", "yellow"]
-GT_VIS_SUFFIX = "_gt.png"
-PRED_VIS_SUFFIX = "_pred.png"
 
 
 def e2ecr_test(out_dir, pth_file_path):
@@ -128,12 +125,10 @@ def e2ecr_test(out_dir, pth_file_path):
 					allow_pickle=True,
 				)
 
-				gt_visualization_path = visualization_dir / image_name.replace(".png", GT_VIS_SUFFIX)
-				pred_visualization_path = visualization_dir / image_name.replace(".png", PRED_VIS_SUFFIX)
+				visualization_path = visualization_dir / image_name
 				_visualize_points(
 					image_tensor=image_tensor.detach().cpu(),
-					gt_save_path=gt_visualization_path,
-					pred_save_path=pred_visualization_path,
+					save_path=visualization_path,
 					gt_points=gt_points,
 					gt_labels=gt_labels,
 					pred_points=pred_points,
@@ -144,7 +139,7 @@ def e2ecr_test(out_dir, pth_file_path):
 				top_scores = ", ".join(f"{score:.4f}" for score in pred_scores[:5].tolist()) if pred_scores.size > 0 else "None"
 				per_image_lines.append(
 					f"image={image_name} | gt={gt_points.shape[0]} | pred={pred_points.shape[0]} | "
-					f"tp={tp} | fp={fp} | fn={fn} | top_scores=[{top_scores}] | pred_vis={pred_visualization_path.as_posix()} | gt_vis={gt_visualization_path.as_posix()}"
+					f"tp={tp} | fp={fp} | fn={fn} | top_scores=[{top_scores}] | vis={visualization_path.as_posix()}"
 				)
 
 	precision, recall, f1 = _compute_precision_recall_f1(summary["tp"], summary["fp"], summary["fn"])
@@ -304,28 +299,25 @@ def _compute_precision_recall_f1(tp, fp, fn):
 	return precision, recall, f1
 
 
-
-def _visualize_points(image_tensor, gt_save_path, pred_save_path, gt_points, gt_labels, pred_points, pred_labels, pred_scores):
-	# GT 和预测分成两张图保存，便于分别观察标注和模型输出。
-	gt_image = F.to_pil_image(image_tensor)
-	gt_draw = ImageDraw.Draw(gt_image)
+def _visualize_points(image_tensor, save_path, gt_points, gt_labels, pred_points, pred_labels, pred_scores):
+	# 可视化时用十字标出 GT，用圆圈和分数标出预测点，便于人工排查。
+	image = F.to_pil_image(image_tensor)
+	draw = ImageDraw.Draw(image)
 	for point, label in zip(gt_points.tolist(), gt_labels.tolist()):
-		_draw_prediction_square(gt_draw, point, PREDICTION_COLORS[int(label)])
-
-	pred_image = F.to_pil_image(image_tensor)
-	pred_draw = ImageDraw.Draw(pred_image)
-	for point, label in zip(pred_points.tolist(), pred_labels.tolist()):
-		_draw_prediction_square(pred_draw, point, PREDICTION_COLORS[int(label)])
-
-	gt_save_path = Path(gt_save_path)
-	pred_save_path = Path(pred_save_path)
-	gt_save_path.parent.mkdir(parents=True, exist_ok=True)
-	pred_save_path.parent.mkdir(parents=True, exist_ok=True)
-	gt_image.save(gt_save_path)
-	pred_image.save(pred_save_path)
+		_draw_point(draw, point, CLASS_COLORS[int(label)], radius=4, with_cross=True)
+	for point, label, score in zip(pred_points.tolist(), pred_labels.tolist(), pred_scores.tolist()):
+		_draw_point(draw, point, CLASS_COLORS[int(label)], radius=6, with_cross=False)
+		x_coord, y_coord = float(point[0]), float(point[1])
+		draw.text((x_coord + 4.0, y_coord + 4.0), f"{score:.2f}", fill=CLASS_COLORS[int(label)])
+	save_path = Path(save_path)
+	save_path.parent.mkdir(parents=True, exist_ok=True)
+	image.save(save_path)
 
 
-def _draw_prediction_square(draw, point, color):
-	# GT 和预测统一使用以中心点为中心的 5x5 实心方块绘制。
-	x_coord, y_coord = int(round(float(point[0]))), int(round(float(point[1])))
-	draw.rectangle((x_coord - 2, y_coord - 2, x_coord + 2, y_coord + 2), fill=color, outline=color)
+def _draw_point(draw, point, color, radius, with_cross):
+	# 统一绘制点标记，GT 可带十字，预测只画圆圈。
+	x_coord, y_coord = float(point[0]), float(point[1])
+	draw.ellipse((x_coord - radius, y_coord - radius, x_coord + radius, y_coord + radius), outline=color, width=2)
+	if with_cross:
+		draw.line((x_coord - radius, y_coord, x_coord + radius, y_coord), fill=color, width=2)
+		draw.line((x_coord, y_coord - radius, x_coord, y_coord + radius), fill=color, width=2)

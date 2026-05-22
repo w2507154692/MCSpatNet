@@ -5,11 +5,11 @@ import shutil
 
 CHECKPOINTS_ROOT_DIR = './exp'   # 所有训练输出的根目录
 # 当前实验对应的子目录名称，最终模型权重会从 <checkpoints_root_dir>/<checkpoints_folder_name> 下读取。
-CHECKPOINTS_FOLDER_NAME = 'exp9_e2ecr_brcam2c'
+CHECKPOINTS_FOLDER_NAME = 'exp7_faster_rcnn_consep_patch'
 EVAL_ROOT_DIR = './exp'
-EPOCH = 41
-TYPE = 'e2ecr'
-SUFFIX = ''   # 后缀，进行额外补充，默认为空
+EPOCH = 163
+TYPE = 'faster_rcnn'
+SUFFIX = '_score_threshold_0.15'   # 后缀，进行额外补充，默认为空
 
 # 备份代码到实验目录下
 def backup_python_files(experiment_dir):
