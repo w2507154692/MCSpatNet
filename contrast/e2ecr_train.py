@@ -42,6 +42,7 @@ LAMBDA_REG = 1e-3
 INFERENCE_SCORE_THRESHOLD = 0.6
 INFERENCE_DISTANCE_THRESHOLD = 12.0
 INFERENCE_NMS_KERNEL_SIZE = 5
+CHECKPOINT_SAVE_INTERVAL = 25
 
 def e2ecr_train(checkpoints_save_dir, logger):
 	"""E2ECR 训练入口。
@@ -508,6 +509,26 @@ def e2ecr_train(checkpoints_save_dir, logger):
 		logger.info(
 			f"Epoch {epoch} 验证分类感知指标: precision={val_precision:.6f} | recall={val_recall:.6f} | f1={val_f1:.6f}"
 		)
+
+		# 除了只保留当前最佳权重外，这里还额外按固定 epoch 间隔存一份阶段性权重。
+		# 这样即使后面训练退化，也仍然可以回溯到中间过程中的模型状态。
+		if epoch % CHECKPOINT_SAVE_INTERVAL == 0:
+			periodic_checkpoint_path = checkpoints_dir / f"e2ecr_epoch{epoch}.pth"
+			torch.save(
+				{
+					"epoch": epoch,
+					"best_val_loss": best_val_loss,
+					"best_val_f1": best_val_f1,
+					"val_loss": val_loss,
+					"val_f1": val_f1,
+					"model_state_dict": model.state_dict(),
+					"optimizer_state_dict": optimizer.state_dict(),
+					"scheduler_state_dict": scheduler.state_dict(),
+					"model_config": asdict(model_config),
+				},
+				periodic_checkpoint_path,
+			)
+			logger.info(f"Epoch {epoch} 已保存周期性权重: {periodic_checkpoint_path}")
 
 		# 这里只保留“当前最好”的权重文件。
 		# 一旦验证损失刷新，就删除上一份最佳权重，避免目录里累积过多 checkpoint。

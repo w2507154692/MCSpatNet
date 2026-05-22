@@ -21,7 +21,7 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TEST_BATCH_SIZE = 1
 NUM_WORKERS = 0 if platform.system() == "Windows" else 4
 DISTANCE_THRESHOLD = 12.0
-INFERENCE_SCORE_THRESHOLD = 0.3
+INFERENCE_SCORE_THRESHOLD = 0.75
 RESULTS_FILE_NAME = "test_results.txt"
 VISUALIZATION_DIR_NAME = "visualizations"
 PREDICTION_DIR_NAME = "predictions"
