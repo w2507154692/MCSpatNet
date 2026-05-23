@@ -2,14 +2,22 @@ from __future__ import annotations
 
 import csv
 from collections import OrderedDict
+import importlib
+import importlib.util
 from pathlib import Path
-import random
 
 import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision.transforms import functional as F
+
+
+# 通过惰性检测第三方库是否可用，避免在未安装依赖时导入阶段直接报错。
+if importlib.util.find_spec("albumentations") is not None:
+	A = importlib.import_module("albumentations")
+else:
+	A = None
 
 
 class MoNuSACDataset(Dataset):
@@ -115,6 +123,10 @@ class BRCAM2CE2ECRDataset(Dataset):
 		self.phase = phase
 		self.target_size = crop_size
 		self.transform = transform
+		if self.phase == "train" and self.transform and A is None:
+			raise ImportError("训练增强依赖 albumentations，请先安装: pip install albumentations")
+		# 训练增强交给第三方库统一管理，避免手写几何变换时漏掉点坐标同步。
+		self.train_transform = self._build_train_transform() if self.phase == "train" and self.transform else None
 		self.split_file = self._resolve_split_file(phase)
 		self.image_names = np.loadtxt(self.split_file, dtype=str).tolist()
 		if isinstance(self.image_names, str):
@@ -177,57 +189,33 @@ class BRCAM2CE2ECRDataset(Dataset):
 			raise ValueError(f"split 文件不存在: {split_file}")
 		return split_file
 
+	def _build_train_transform(self):
+		# Albumentations 会自动同步图像和 keypoints 的几何变化，
+		# 这里优先选择对点标注安全、且对病理图像泛化更有帮助的标准增强。
+		return A.Compose(
+			[
+				A.HorizontalFlip(p=0.5),
+				A.VerticalFlip(p=0.5),
+				A.RandomRotate90(p=0.75),
+				A.RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.1, p=0.8),
+				A.HueSaturationValue(hue_shift_limit=6, sat_shift_limit=8, val_shift_limit=6, p=0.5),
+			],
+			keypoint_params=A.KeypointParams(format="xy", remove_invisible=False),
+		)
+
 	def _apply_train_transforms(self, image_np: np.ndarray, points: np.ndarray):
-		height, width = image_np.shape[:2]
-		if random.random() < 0.5:
-			image_np = image_np[:, ::-1].copy()		# 左右翻转
-			if points.shape[0] > 0:
-				points = points.copy()
-				points[:, 0] = (width - 1) - points[:, 0]
-		if random.random() < 0.5:
-			image_np = image_np[::-1, :].copy()		# 上下翻转
-			if points.shape[0] > 0:
-				points = points.copy()
-				points[:, 1] = (height - 1) - points[:, 1]
+		if self.train_transform is None:
+			return np.ascontiguousarray(image_np), points.astype(np.float32, copy=False)
 
-		# 90 度整数倍旋转对点标注最稳妥：不会引入任意角度插值误差，
-		# 但能显著增加细胞排列方向的多样性。
-		rotation_k = random.randint(0, 3)
-		if rotation_k == 1:
-			image_np = np.rot90(image_np, k=1).copy()
-			if points.shape[0] > 0:
-				points = points.copy()
-				x_coords = points[:, 0].copy()
-				y_coords = points[:, 1].copy()
-				points[:, 0] = y_coords
-				points[:, 1] = (width - 1) - x_coords
-		elif rotation_k == 2:
-			image_np = np.rot90(image_np, k=2).copy()
-			if points.shape[0] > 0:
-				points = points.copy()
-				points[:, 0] = (width - 1) - points[:, 0]
-				points[:, 1] = (height - 1) - points[:, 1]
-		elif rotation_k == 3:
-			image_np = np.rot90(image_np, k=3).copy()
-			if points.shape[0] > 0:
-				points = points.copy()
-				x_coords = points[:, 0].copy()
-				y_coords = points[:, 1].copy()
-				points[:, 0] = (height - 1) - y_coords
-				points[:, 1] = x_coords
-
-		# 颜色扰动用于模拟不同切片和染色批次之间的亮度、对比度和色偏变化。
-		# 扰动范围控制得较小，避免把病理图像的结构信息破坏得过于严重。
-		if random.random() < 0.8:
-			brightness_factor = random.uniform(0.9, 1.1)
-			contrast_factor = random.uniform(0.9, 1.1)
-			channel_scale = np.random.uniform(0.95, 1.05, size=(1, 1, image_np.shape[2])).astype(np.float32)
-			image_mean = image_np.mean(axis=(0, 1), keepdims=True)
-			image_np = np.clip(image_np * brightness_factor, 0.0, 1.0)
-			image_np = np.clip((image_np - image_mean) * contrast_factor + image_mean, 0.0, 1.0)
-			image_np = np.clip(image_np * channel_scale, 0.0, 1.0)
-
-		return np.ascontiguousarray(image_np), points.astype(np.float32, copy=False)
+		# 对空点集也统一走同一套接口，保证训练代码不需要区分是否有 GT。
+		transformed = self.train_transform(
+			image=image_np,
+			keypoints=points.tolist() if points.shape[0] > 0 else [],
+		)
+		transformed_points = np.asarray(transformed["keypoints"], dtype=np.float32)
+		if transformed_points.size == 0:
+			transformed_points = np.zeros((0, 2), dtype=np.float32)
+		return np.ascontiguousarray(transformed["image"]), transformed_points
 
 	def _resize_image_and_points(self, image_np: np.ndarray, points: np.ndarray):
 		original_height, original_width = image_np.shape[:2]
@@ -285,7 +273,7 @@ def get_num_classes(classes_csv: str | Path) -> int:
 	return max(label_ids) + 1
 
 
-def build_e2ecr_dataset(dataset_type: str, data_root: str | Path, phase: str, crop_size: int = 384):
+def build_e2ecr_dataset(dataset_type: str, data_root: str | Path, phase: str, crop_size: int = 384, transform: bool = False):
 	dataset_type_normalized = dataset_type.strip().lower()
 	phase_normalized = phase.strip().lower()
 	dataset_registry = {
@@ -301,7 +289,7 @@ def build_e2ecr_dataset(dataset_type: str, data_root: str | Path, phase: str, cr
 		data_root=data_root,
 		phase=phase_normalized,
 		crop_size=crop_size,
-		transform=(phase_normalized == "train"),
+		transform=transform,
 	)
 
 

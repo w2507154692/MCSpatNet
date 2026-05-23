@@ -38,12 +38,14 @@ TRAIN_CANDIDATE_MULTIPLIER = 16
 TRAIN_CANDIDATE_SCORE_THRESHOLD = 0.05
 ALPHA = 0.05
 BETA = 0.06
+FOCAL_GAMMA = 2.0
 LAMBDA_REG = 1e-3
-INFERENCE_SCORE_THRESHOLD = 0.4
-INFERENCE_DISTANCE_THRESHOLD = 12.0
-INFERENCE_NMS_KERNEL_SIZE = 5
-INFERENCE_POINT_NMS_RADIUS = 8.0
-CHECKPOINT_SAVE_INTERVAL = 25
+INFERENCE_SCORE_THRESHOLD = 0.4		# 预测置信度阈值
+INFERENCE_DISTANCE_THRESHOLD = 12.0		# 预测点正确的半径阈值
+INFERENCE_NMS_KERNEL_SIZE = 7	# 局部峰值的核半径（NMS前先筛掉一部分）
+INFERENCE_POINT_NMS_RADIUS = 10.0	# NMS 半径
+CHECKPOINT_SAVE_INTERVAL = 25	# checkpoint保存间隔
+TRANSFORM = True	# 是否开启数据增强
 
 def e2ecr_train(checkpoints_save_dir, logger):
 	"""E2ECR 训练入口。
@@ -66,6 +68,7 @@ def e2ecr_train(checkpoints_save_dir, logger):
 		data_root=DATA_ROOT,
 		phase="train",
 		crop_size=TRAIN_CROP_SIZE,
+		transform=TRANSFORM
 	)
 	val_dataset = build_e2ecr_dataset(
 		dataset_type=DATASET_TYPE,
@@ -240,13 +243,15 @@ def e2ecr_train(checkpoints_save_dir, logger):
 						loss_reg = F.mse_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
 						loss_cls = F.cross_entropy(cls_logits[matched_indices], gt_labels[matched_gt_cols])
 
-				# 检测损失在全部像素位置上计算。
-				# 这里用 beta 对正负样本重新加权，减轻前景点稀少带来的类别不平衡问题。
-				# 正样本应该更重、背景应该更轻，否则模型会倾向于把所有位置都预测成背景。
+				# 检测损失改成 focal loss。
+				# 这里仍然保留正负样本 alpha 加权，但不再让海量容易分类的背景像素主导训练，
+				# 从而减轻中后期模型越来越保守、召回持续下滑的问题。
 				det_losses = F.cross_entropy(det_logits, det_targets, reduction="none")
-				det_weights = torch.full_like(det_losses, BETA)
-				det_weights[det_targets == 1] = 1.0 - BETA
-				loss_det = (det_losses * det_weights).mean()
+				pt = torch.exp(-det_losses)
+				alpha_weights = torch.full_like(det_losses, BETA)
+				alpha_weights[det_targets == 1] = 1.0 - BETA
+				focal_weights = alpha_weights * ((1.0 - pt) ** FOCAL_GAMMA)
+				loss_det = (focal_weights * det_losses).sum() / alpha_weights.sum().clamp_min(1e-6)
 
 				# 先累计单张图损失，后面统一对 batch 求平均。
 				loss_dict["loss_reg"] = loss_dict["loss_reg"] + loss_reg
@@ -408,11 +413,14 @@ def e2ecr_train(checkpoints_save_dir, logger):
 							loss_reg = F.mse_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
 							loss_cls = F.cross_entropy(cls_logits[matched_indices], gt_labels[matched_gt_cols])
 
-					# 检测损失依旧覆盖整张图，用于衡量背景和前景的整体分离效果。
+					# 验证损失与训练阶段保持同一 focal loss 定义，
+					# 避免因为损失口径不同导致训练日志和验证日志不可比。
 					det_losses = F.cross_entropy(det_logits, det_targets, reduction="none")
-					det_weights = torch.full_like(det_losses, BETA)
-					det_weights[det_targets == 1] = 1.0 - BETA
-					loss_det = (det_losses * det_weights).mean()
+					pt = torch.exp(-det_losses)
+					alpha_weights = torch.full_like(det_losses, BETA)
+					alpha_weights[det_targets == 1] = 1.0 - BETA
+					focal_weights = alpha_weights * ((1.0 - pt) ** FOCAL_GAMMA)
+					loss_det = (focal_weights * det_losses).sum() / alpha_weights.sum().clamp_min(1e-6)
 
 					loss_dict["loss_reg"] = loss_dict["loss_reg"] + loss_reg
 					loss_dict["loss_det"] = loss_dict["loss_det"] + loss_det
