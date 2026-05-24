@@ -40,6 +40,7 @@ ALPHA = 0.05
 BETA = 0.06
 FOCAL_GAMMA = 2.0
 LAMBDA_REG = 1e-3
+TRAIN_MATCH_DISTANCE_THRESHOLD = 16.0	# 训练期匈牙利匹配的最大允许距离，超过该距离的配对直接丢弃
 INFERENCE_SCORE_THRESHOLD = 0.4		# 预测置信度阈值
 INFERENCE_DISTANCE_THRESHOLD = 12.0		# 预测点正确的半径阈值
 INFERENCE_NMS_KERNEL_SIZE = 7	# 局部峰值的核半径（NMS前先筛掉一部分）
@@ -233,15 +234,21 @@ def e2ecr_train(checkpoints_save_dir, logger):
 					cost_matrix = ALPHA * distance_matrix - candidate_scores.unsqueeze(1) - class_score_matrix
 
 					# SciPy 的 linear_sum_assignment 会返回一组一对一匹配结果。
-					# 匹配上的候选点会被视为正样本，同时用于回归和分类监督。
+					# 但这里还要额外做一次距离截断，防止“虽然被匈牙利算法配上，
+					# 但几何位置已经离 GT 太远”的脏配对进入监督。
 					matched_candidate_rows, matched_gt_cols = linear_sum_assignment(cost_matrix.detach().cpu().numpy())
 					if len(matched_candidate_rows) > 0:
 						matched_candidate_rows = torch.as_tensor(matched_candidate_rows, dtype=torch.long, device=DEVICE)
 						matched_gt_cols = torch.as_tensor(matched_gt_cols, dtype=torch.long, device=DEVICE)
-						matched_indices = candidate_indices[matched_candidate_rows]
-						det_targets[matched_indices] = 1
-						loss_reg = F.mse_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
-						loss_cls = F.cross_entropy(cls_logits[matched_indices], gt_labels[matched_gt_cols])
+						matched_distances = distance_matrix[matched_candidate_rows, matched_gt_cols]
+						valid_match_mask = matched_distances <= TRAIN_MATCH_DISTANCE_THRESHOLD
+						if valid_match_mask.any():
+							matched_candidate_rows = matched_candidate_rows[valid_match_mask]
+							matched_gt_cols = matched_gt_cols[valid_match_mask]
+							matched_indices = candidate_indices[matched_candidate_rows]
+							det_targets[matched_indices] = 1
+							loss_reg = F.mse_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
+							loss_cls = F.cross_entropy(cls_logits[matched_indices], gt_labels[matched_gt_cols])
 
 				# 检测损失改成 focal loss。
 				# 这里仍然保留正负样本 alpha 加权，但不再让海量容易分类的背景像素主导训练，
@@ -408,10 +415,15 @@ def e2ecr_train(checkpoints_save_dir, logger):
 						if len(matched_candidate_rows) > 0:
 							matched_candidate_rows = torch.as_tensor(matched_candidate_rows, dtype=torch.long, device=DEVICE)
 							matched_gt_cols = torch.as_tensor(matched_gt_cols, dtype=torch.long, device=DEVICE)
-							matched_indices = candidate_indices[matched_candidate_rows]
-							det_targets[matched_indices] = 1
-							loss_reg = F.mse_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
-							loss_cls = F.cross_entropy(cls_logits[matched_indices], gt_labels[matched_gt_cols])
+							matched_distances = distance_matrix[matched_candidate_rows, matched_gt_cols]
+							valid_match_mask = matched_distances <= TRAIN_MATCH_DISTANCE_THRESHOLD
+							if valid_match_mask.any():
+								matched_candidate_rows = matched_candidate_rows[valid_match_mask]
+								matched_gt_cols = matched_gt_cols[valid_match_mask]
+								matched_indices = candidate_indices[matched_candidate_rows]
+								det_targets[matched_indices] = 1
+								loss_reg = F.mse_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
+								loss_cls = F.cross_entropy(cls_logits[matched_indices], gt_labels[matched_gt_cols])
 
 					# 验证损失与训练阶段保持同一 focal loss 定义，
 					# 避免因为损失口径不同导致训练日志和验证日志不可比。
