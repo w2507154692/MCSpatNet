@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -26,8 +26,7 @@ VAL_BATCH_SIZE = 4
 NUM_WORKERS = 0 if platform.system() == "Windows" else 8
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-4
-LR_STEP_SIZE = 20
-LR_GAMMA = 0.5
+MIN_LEARNING_RATE = 1e-6
 EVAL_INTERVAL_EPOCHS = 1
 PRINT_FREQ = 10
 GRAD_CLIP_NORM = 5.0
@@ -105,7 +104,9 @@ def e2ecr_train(checkpoints_save_dir, logger):
 	model_config = E2ECRConfig(num_classes=get_e2ecr_num_classes(DATASET_TYPE))
 	model = build_e2ecr(model_config).to(DEVICE)
 	optimizer = AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-	scheduler = StepLR(optimizer, step_size=LR_STEP_SIZE, gamma=LR_GAMMA)
+	# 将原来的阶梯式衰减改成余弦退火，让学习率随 epoch 平滑下降，
+	# 避免在若干固定轮次出现过于突兀的跳变，减少中后期训练震荡。
+	scheduler = CosineAnnealingLR(optimizer, T_max=NUM_EPOCHS, eta_min=MIN_LEARNING_RATE)
 
 	best_val_loss = float("inf")
 	best_val_f1 = float("-inf")
