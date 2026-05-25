@@ -20,7 +20,7 @@ DATA_ROOT = Path("data") / "BRCA-M2C"
 DATASET_TYPE = "brca-m2c"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-NUM_EPOCHS = 150
+NUM_EPOCHS = 300
 BATCH_SIZE = 12
 VAL_BATCH_SIZE = 4
 NUM_WORKERS = 0 if platform.system() == "Windows" else 8
@@ -248,7 +248,9 @@ def e2ecr_train(checkpoints_save_dir, logger):
 							matched_gt_cols = matched_gt_cols[valid_match_mask]
 							matched_indices = candidate_indices[matched_candidate_rows]
 							det_targets[matched_indices] = 1
-							loss_reg = F.mse_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
+							# 回归损失改成 Smooth L1，减少少量大偏差匹配对梯度的过度放大，
+							# 让中后期训练比 MSE 更平稳一些。
+							loss_reg = F.smooth_l1_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
 							loss_cls = F.cross_entropy(cls_logits[matched_indices], gt_labels[matched_gt_cols])
 
 				# 检测损失改成 focal loss。
@@ -423,7 +425,9 @@ def e2ecr_train(checkpoints_save_dir, logger):
 								matched_gt_cols = matched_gt_cols[valid_match_mask]
 								matched_indices = candidate_indices[matched_candidate_rows]
 								det_targets[matched_indices] = 1
-								loss_reg = F.mse_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
+								# 验证阶段保持与训练一致的 Smooth L1 回归损失定义，
+								# 避免训练/验证日志在回归项上出现口径差异。
+								loss_reg = F.smooth_l1_loss(pred_points[matched_indices], gt_points[matched_gt_cols], reduction="mean")
 								loss_cls = F.cross_entropy(cls_logits[matched_indices], gt_labels[matched_gt_cols])
 
 					# 验证损失与训练阶段保持同一 focal loss 定义，
