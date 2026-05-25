@@ -20,7 +20,7 @@ DATA_ROOT = Path("data") / "BRCA-M2C"
 DATASET_TYPE = "brca-m2c"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-NUM_EPOCHS = 300
+NUM_EPOCHS = 200
 BATCH_SIZE = 12
 VAL_BATCH_SIZE = 4
 NUM_WORKERS = 0 if platform.system() == "Windows" else 8

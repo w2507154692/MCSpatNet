@@ -5,6 +5,7 @@ from dataclasses import asdict, dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision.models import ResNet34_Weights, resnet34
 
 
 @dataclass
@@ -14,6 +15,8 @@ class E2ECRConfig:
 	input_channels: int = 3
 	num_classes: int = 3
 	base_channels: int = 32
+	encoder_name: str = "resnet34"
+	pretrained_encoder: bool = False
 
 
 class ConvBlock(nn.Module):
@@ -55,26 +58,57 @@ class UpBlock(nn.Module):
 		return self.block(x)
 
 
+def _build_resnet34_encoder(config: E2ECRConfig):
+	# 编码器默认采用 ResNet-34。
+	# 这样可以复用成熟的预训练特征提取能力，同时继续保留 U-Net 解码器对高分辨率细节的恢复能力。
+	if config.encoder_name.lower() != "resnet34":
+		raise ValueError(f"当前仅支持 encoder_name='resnet34'，实际为 {config.encoder_name}")
+
+	weights = ResNet34_Weights.DEFAULT if config.pretrained_encoder and config.input_channels == 3 else None
+	backbone = resnet34(weights=weights)
+
+	# 如果输入通道数不是 3，则替换第一层卷积。
+	# 预训练权重只对 3 通道输入直接可用，因此这里保留普通初始化。
+	if config.input_channels != 3:
+		backbone.conv1 = nn.Conv2d(
+			config.input_channels,
+			64,
+			kernel_size=7,
+			stride=2,
+			padding=3,
+			bias=False,
+		)
+
+	return backbone
+
+
 class E2ECR(nn.Module):
 	def __init__(self, config: E2ECRConfig | None = None) -> None:
 		super().__init__()
 		self.config = config or E2ECRConfig()
 
-		# 这里使用一个轻量 U-Net 主干，输出共享的高分辨率特征图，
-		# 再分别接回归头、检测头、分类头。
+		# 这里将原来的纯 U-Net 编码器替换成 ResNet-34 编码器，
+		# 但解码器仍然保留 U-Net 风格的逐层上采样与 skip fusion，
+		# 从而兼顾预训练语义特征和点级定位所需的高分辨率细节。
+		backbone = _build_resnet34_encoder(self.config)
 		base = self.config.base_channels
-		self.enc1 = ConvBlock(self.config.input_channels, base)
-		self.enc2 = ConvBlock(base, base * 2)
-		self.enc3 = ConvBlock(base * 2, base * 4)
-		self.bottleneck = ConvBlock(base * 4, base * 8)
-		self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
-		self.dec3 = UpBlock(base * 8, base * 4, base * 4)
-		self.dec2 = UpBlock(base * 4, base * 2, base * 2)
-		self.dec1 = UpBlock(base * 2, base, base)
+		self.stem = nn.Sequential(backbone.conv1, backbone.bn1, backbone.relu)
+		self.maxpool = backbone.maxpool
+		self.layer1 = backbone.layer1
+		self.layer2 = backbone.layer2
+		self.layer3 = backbone.layer3
+		self.layer4 = backbone.layer4
 
+		self.dec4 = UpBlock(512, 256, 256)
+		self.dec3 = UpBlock(256, 128, 128)
+		self.dec2 = UpBlock(128, 64, 64)
+		self.dec1 = UpBlock(64, 64, 64)
+
+		# 解码器回到 1/2 分辨率后，再上采样回原图大小，
+		# 最后用较轻的共享头生成三张密集预测图。
 		self.shared_head = nn.Sequential(
-			nn.Conv2d(base, base, kernel_size=3, padding=1, bias=False),
+			nn.Conv2d(64, base, kernel_size=3, padding=1, bias=False),
 			nn.BatchNorm2d(base),
 			nn.ReLU(inplace=True),
 		)
@@ -109,14 +143,19 @@ class E2ECR(nn.Module):
 				padded_images.append(F.pad(image, (0, pad_right, 0, pad_bottom), value=1.0))
 			image_batch = torch.stack(padded_images, dim=0)
 
-		x1 = self.enc1(image_batch)
-		x2 = self.enc2(self.pool(x1))
-		x3 = self.enc3(self.pool(x2))
-		x4 = self.bottleneck(self.pool(x3))
+		# ResNet-34 编码器输出 5 个层级的特征：
+		# stem(1/2), layer1(1/4), layer2(1/8), layer3(1/16), layer4(1/32)。
+		x1 = self.stem(image_batch)
+		x2 = self.layer1(self.maxpool(x1))
+		x3 = self.layer2(x2)
+		x4 = self.layer3(x3)
+		x5 = self.layer4(x4)
 
-		x = self.dec3(x4, x3)
+		x = self.dec4(x5, x4)
+		x = self.dec3(x, x3)
 		x = self.dec2(x, x2)
 		x = self.dec1(x, x1)
+		x = F.interpolate(x, size=image_batch.shape[-2:], mode="bilinear", align_corners=False)
 		x = self.shared_head(x)
 
 		reg_batch = self.reg_head(x)
