@@ -279,7 +279,7 @@ class CoNSePE2ECRDataset(BRCAM2CE2ECRDataset):
 			image_np, points = self._apply_train_transforms(image_np, points)
 			# CoNSeP 训练图像数量较少，因此训练阶段额外使用随机裁剪，
 			# 让每张整图在不同 epoch 提供更多局部视野，提升数据利用率。
-			image_np, points = self._apply_random_crop(image_np, points, self.target_size)
+			image_np, points, labels = self._apply_random_crop(image_np, points, labels, self.target_size)
 
 		# CoNSeP 训练样本如果已经被随机裁成目标尺寸，下面 resize 基本是恒等操作；
 		# 验证和测试则会统一缩放到目标尺寸，保持与现有训练脚本接口兼容。
@@ -313,12 +313,12 @@ class CoNSePE2ECRDataset(BRCAM2CE2ECRDataset):
 			raise ValueError(f"split 文件不存在: {split_file}")
 		return split_file
 
-	def _apply_random_crop(self, image_np: np.ndarray, points: np.ndarray, crop_size: int):
+	def _apply_random_crop(self, image_np: np.ndarray, points: np.ndarray, labels: np.ndarray, crop_size: int):
 		height, width = image_np.shape[:2]
 		crop_height = min(crop_size, height)
 		crop_width = min(crop_size, width)
 		if crop_height == height and crop_width == width:
-			return image_np, points.astype(np.float32, copy=False)
+			return image_np, points.astype(np.float32, copy=False), labels.astype(np.int64, copy=False)
 
 		max_top = height - crop_height
 		max_left = width - crop_width
@@ -348,7 +348,7 @@ class CoNSePE2ECRDataset(BRCAM2CE2ECRDataset):
 		cropped_image = np.ascontiguousarray(image_np[top:bottom, left:right])
 
 		if points.shape[0] == 0:
-			return cropped_image, points.astype(np.float32, copy=False)
+			return cropped_image, points.astype(np.float32, copy=False), labels.astype(np.int64, copy=False)
 
 		inside_mask = (
 			(points[:, 0] >= left)
@@ -357,10 +357,11 @@ class CoNSePE2ECRDataset(BRCAM2CE2ECRDataset):
 			& (points[:, 1] < bottom)
 		)
 		cropped_points = points[inside_mask].astype(np.float32, copy=True)
+		cropped_labels = labels[inside_mask].astype(np.int64, copy=True)
 		if cropped_points.shape[0] > 0:
 			cropped_points[:, 0] -= left
 			cropped_points[:, 1] -= top
-		return cropped_image, cropped_points
+		return cropped_image, cropped_points, cropped_labels
 
 
 def detection_collate_fn(batch):
