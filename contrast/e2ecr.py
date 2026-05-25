@@ -67,6 +67,11 @@ def _build_resnet34_encoder(config: E2ECRConfig):
 	weights = ResNet34_Weights.DEFAULT if config.pretrained_encoder and config.input_channels == 3 else None
 	backbone = resnet34(weights=weights)
 
+	# 细胞点检测比自然图像分类更依赖高分辨率细节。
+	# 因此这里保留 ResNet 的残差主体，但把 stem 的首层步幅改为 1，
+	# 同时在外部前向里去掉 maxpool，避免一开始就把空间分辨率压到 1/4。
+	backbone.conv1.stride = (1, 1)
+
 	# 如果输入通道数不是 3，则替换第一层卷积。
 	# 预训练权重只对 3 通道输入直接可用，因此这里保留普通初始化。
 	if config.input_channels != 3:
@@ -74,7 +79,7 @@ def _build_resnet34_encoder(config: E2ECRConfig):
 			config.input_channels,
 			64,
 			kernel_size=7,
-			stride=2,
+			stride=1,
 			padding=3,
 			bias=False,
 		)
@@ -94,7 +99,7 @@ class E2ECR(nn.Module):
 		base = self.config.base_channels
 
 		self.stem = nn.Sequential(backbone.conv1, backbone.bn1, backbone.relu)
-		self.maxpool = backbone.maxpool
+		self.maxpool = nn.Identity()
 		self.layer1 = backbone.layer1
 		self.layer2 = backbone.layer2
 		self.layer3 = backbone.layer3
@@ -143,8 +148,9 @@ class E2ECR(nn.Module):
 				padded_images.append(F.pad(image, (0, pad_right, 0, pad_bottom), value=1.0))
 			image_batch = torch.stack(padded_images, dim=0)
 
-		# ResNet-34 编码器输出 5 个层级的特征：
-		# stem(1/2), layer1(1/4), layer2(1/8), layer3(1/16), layer4(1/32)。
+		# 这里使用高分辨率 stem：
+		# stem(1/1), layer1(1/1), layer2(1/2), layer3(1/4), layer4(1/8)。
+		# 这样更符合点级密集预测任务对边缘和细粒度定位的要求。
 		x1 = self.stem(image_batch)
 		x2 = self.layer1(self.maxpool(x1))
 		x3 = self.layer2(x2)
@@ -155,6 +161,7 @@ class E2ECR(nn.Module):
 		x = self.dec3(x, x3)
 		x = self.dec2(x, x2)
 		x = self.dec1(x, x1)
+		# dec1 后已经回到原图分辨率；这里保留一次尺寸对齐，主要用于处理奇数尺寸输入时的边界差异。
 		x = F.interpolate(x, size=image_batch.shape[-2:], mode="bilinear", align_corners=False)
 		x = self.shared_head(x)
 

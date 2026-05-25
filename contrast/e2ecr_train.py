@@ -101,7 +101,12 @@ def e2ecr_train(checkpoints_save_dir, logger):
 	# det: 前景/背景二分类 logits；
 	# cls: 细胞类别 logits。
 	# 损失如何计算，完全在训练脚本里显式展开。
-	model_config = E2ECRConfig(num_classes=get_e2ecr_num_classes(DATASET_TYPE))
+	# ResNet 编码器如果仍然从头训练，收敛速度通常会明显慢于原来的轻量 U-Net。
+	# 这里直接打开 ImageNet 预训练，先把编码器初始化到更合理的特征空间。
+	model_config = E2ECRConfig(
+		num_classes=get_e2ecr_num_classes(DATASET_TYPE),
+		pretrained_encoder=True,
+	)
 	model = build_e2ecr(model_config).to(DEVICE)
 	optimizer = AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
 	# 将原来的阶梯式衰减改成余弦退火，让学习率随 epoch 平滑下降，
