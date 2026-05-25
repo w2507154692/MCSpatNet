@@ -253,6 +253,116 @@ class BRCAM2CE2ECRDataset(Dataset):
 		return np.asarray(points, dtype=np.float32), np.asarray(labels, dtype=np.int64)
 
 
+class CoNSePE2ECRDataset(BRCAM2CE2ECRDataset):
+	def __init__(
+		self,
+		data_root: str | Path,
+		phase: str,
+		crop_size: int = 384,
+		transform: bool = False,
+		use_five_fold: bool = False,
+		fold_index: int | None = None,
+	) -> None:
+		self.use_five_fold = use_five_fold
+		self.fold_index = fold_index
+		super().__init__(data_root=data_root, phase=phase, crop_size=crop_size, transform=transform)
+
+	def __getitem__(self, index: int):
+		image_name = self.image_names[index]
+		image = Image.open(self.image_root / image_name).convert("RGB")
+		image_np = np.asarray(image, dtype=np.float32) / 255.0
+		gt_dots = np.load(self.gt_root / image_name.replace(".png", "_gt_dots.npy"), allow_pickle=True)
+		gt_dots = self._normalize_gt_dots(gt_dots)
+		points, labels = self._extract_points_and_labels(gt_dots)
+
+		if self.phase == "train" and self.transform:
+			image_np, points = self._apply_train_transforms(image_np, points)
+			# CoNSeP 训练图像数量较少，因此训练阶段额外使用随机裁剪，
+			# 让每张整图在不同 epoch 提供更多局部视野，提升数据利用率。
+			image_np, points = self._apply_random_crop(image_np, points, self.target_size)
+
+		# CoNSeP 训练样本如果已经被随机裁成目标尺寸，下面 resize 基本是恒等操作；
+		# 验证和测试则会统一缩放到目标尺寸，保持与现有训练脚本接口兼容。
+		image_np, points = self._resize_image_and_points(image_np, points)
+		image_tensor = torch.from_numpy(image_np.transpose(2, 0, 1)).float()
+		target = {
+			"points": torch.from_numpy(points).float(),
+			"labels": torch.from_numpy(labels).long(),
+			"image_id": torch.tensor(index, dtype=torch.long),
+			"image_name": image_name,
+		}
+		return image_tensor, target
+
+	def _resolve_split_file(self, phase: str) -> Path:
+		split_dir = self.data_root / "data_splits"
+		if self.use_five_fold and phase in {"train", "val"}:
+			if self.fold_index is None or self.fold_index < 1:
+				raise ValueError("使用 CoNSeP 五折验证时，fold_index 必须是从 1 开始的正整数")
+			split_file = split_dir / "five_fold" / f"fold{self.fold_index}_{phase}.txt"
+		else:
+			phase_to_split = {
+				"train": "train_split.txt",
+				"val": "val_split.txt",
+				"test": "test_split.txt",
+			}
+			if phase not in phase_to_split:
+				raise ValueError(f"不支持的 phase: {phase}")
+			split_file = split_dir / phase_to_split[phase]
+
+		if not split_file.is_file():
+			raise ValueError(f"split 文件不存在: {split_file}")
+		return split_file
+
+	def _apply_random_crop(self, image_np: np.ndarray, points: np.ndarray, crop_size: int):
+		height, width = image_np.shape[:2]
+		crop_height = min(crop_size, height)
+		crop_width = min(crop_size, width)
+		if crop_height == height and crop_width == width:
+			return image_np, points.astype(np.float32, copy=False)
+
+		max_top = height - crop_height
+		max_left = width - crop_width
+
+		if points.shape[0] > 0:
+			# 优先围绕一个随机真实点裁剪，减少裁到纯背景 patch 的概率。
+			center_point = points[np.random.randint(0, points.shape[0])]
+			min_left = max(0, int(np.floor(center_point[0])) - crop_width + 1)
+			max_left_candidate = min(max_left, int(np.floor(center_point[0])))
+			min_top = max(0, int(np.floor(center_point[1])) - crop_height + 1)
+			max_top_candidate = min(max_top, int(np.floor(center_point[1])))
+
+			if min_left <= max_left_candidate:
+				left = int(np.random.randint(min_left, max_left_candidate + 1))
+			else:
+				left = int(np.random.randint(0, max_left + 1))
+			if min_top <= max_top_candidate:
+				top = int(np.random.randint(min_top, max_top_candidate + 1))
+			else:
+				top = int(np.random.randint(0, max_top + 1))
+		else:
+			left = int(np.random.randint(0, max_left + 1))
+			top = int(np.random.randint(0, max_top + 1))
+
+		right = left + crop_width
+		bottom = top + crop_height
+		cropped_image = np.ascontiguousarray(image_np[top:bottom, left:right])
+
+		if points.shape[0] == 0:
+			return cropped_image, points.astype(np.float32, copy=False)
+
+		inside_mask = (
+			(points[:, 0] >= left)
+			& (points[:, 0] < right)
+			& (points[:, 1] >= top)
+			& (points[:, 1] < bottom)
+		)
+		cropped_points = points[inside_mask].astype(np.float32, copy=True)
+		if cropped_points.shape[0] > 0:
+			cropped_points[:, 0] -= left
+			cropped_points[:, 1] -= top
+		return cropped_image, cropped_points
+
+
 def detection_collate_fn(batch):
 	images, targets = zip(*batch)
 	return list(images), list(targets)
@@ -273,11 +383,20 @@ def get_num_classes(classes_csv: str | Path) -> int:
 	return max(label_ids) + 1
 
 
-def build_e2ecr_dataset(dataset_type: str, data_root: str | Path, phase: str, crop_size: int = 384, transform: bool = False):
+def build_e2ecr_dataset(
+	dataset_type: str,
+	data_root: str | Path,
+	phase: str,
+	crop_size: int = 384,
+	transform: bool = False,
+	use_five_fold: bool = False,
+	fold_index: int | None = None,
+):
 	dataset_type_normalized = dataset_type.strip().lower()
 	phase_normalized = phase.strip().lower()
 	dataset_registry = {
 		"brca-m2c": BRCAM2CE2ECRDataset,
+		"consep": CoNSePE2ECRDataset,
 	}
 	if dataset_type_normalized not in dataset_registry:
 		raise ValueError(
@@ -285,11 +404,21 @@ def build_e2ecr_dataset(dataset_type: str, data_root: str | Path, phase: str, cr
 		)
 	dataset_cls = dataset_registry[dataset_type_normalized]
 	# 训练集打开增强，验证和测试保持确定性，避免评估口径漂移。
+	dataset_kwargs = {
+		"data_root": data_root,
+		"phase": phase_normalized,
+		"crop_size": crop_size,
+		"transform": transform,
+	}
+	if dataset_type_normalized == "consep":
+		dataset_kwargs["use_five_fold"] = use_five_fold
+		dataset_kwargs["fold_index"] = fold_index
 	return dataset_cls(
 		data_root=data_root,
 		phase=phase_normalized,
 		crop_size=crop_size,
 		transform=transform,
+		**({"use_five_fold": use_five_fold, "fold_index": fold_index} if dataset_type_normalized == "consep" else {}),
 	)
 
 
@@ -297,6 +426,7 @@ def get_e2ecr_num_classes(dataset_type: str) -> int:
 	dataset_type_normalized = dataset_type.strip().lower()
 	class_registry = {
 		"brca-m2c": 3,
+		"consep": 3,
 	}
 	if dataset_type_normalized not in class_registry:
 		raise ValueError(

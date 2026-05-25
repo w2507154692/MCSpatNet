@@ -18,9 +18,11 @@ from e2ecr_dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_e2ecr_num_c
 
 DATA_ROOT = Path("data") / "BRCA-M2C"
 DATASET_TYPE = "brca-m2c"
+USE_CONSEP_FIVE_FOLD = False	# 对于CoNSeP数据集使用五折交叉验证
+CONSEP_FOLD_INDEX = 1	# 总共五折，使用第几折
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-NUM_EPOCHS = 200
+NUM_EPOCHS = 100
 BATCH_SIZE = 12
 VAL_BATCH_SIZE = 4
 NUM_WORKERS = 0 if platform.system() == "Windows" else 8
@@ -63,18 +65,23 @@ def e2ecr_train(checkpoints_save_dir, logger):
 	checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
 	# 数据集对象只接收数据根目录和数据集类型，split 文件在数据集内部自行解析。
+	dataset_build_kwargs = {
+		"dataset_type": DATASET_TYPE,
+		"data_root": DATA_ROOT,
+		"crop_size": TRAIN_CROP_SIZE,
+	}
+	if DATASET_TYPE.strip().lower() == "consep":
+		dataset_build_kwargs["use_five_fold"] = USE_CONSEP_FIVE_FOLD
+		dataset_build_kwargs["fold_index"] = CONSEP_FOLD_INDEX if USE_CONSEP_FIVE_FOLD else None
+
 	train_dataset = build_e2ecr_dataset(
-		dataset_type=DATASET_TYPE,
-		data_root=DATA_ROOT,
 		phase="train",
-		crop_size=TRAIN_CROP_SIZE,
-		transform=TRANSFORM
+		transform=TRANSFORM,
+		**dataset_build_kwargs,
 	)
 	val_dataset = build_e2ecr_dataset(
-		dataset_type=DATASET_TYPE,
-		data_root=DATA_ROOT,
 		phase="val",
-		crop_size=TRAIN_CROP_SIZE,
+		**dataset_build_kwargs,
 	)
 
 	# collate_fn 只负责把样本整理成 list，不在这里做 padding。
@@ -120,6 +127,8 @@ def e2ecr_train(checkpoints_save_dir, logger):
 	logger.info(f"训练设备: {DEVICE}")
 	logger.info(f"训练集样本数: {len(train_dataset)} | 验证集样本数: {len(val_dataset)}")
 	logger.info(f"数据集类型: {DATASET_TYPE} | 数据集路径: {DATA_ROOT}")
+	if DATASET_TYPE.strip().lower() == "consep":
+		logger.info(f"CoNSeP 五折验证开关: {USE_CONSEP_FIVE_FOLD} | 当前 fold: {CONSEP_FOLD_INDEX}")
 	logger.info(f"类别数: {get_e2ecr_num_classes(DATASET_TYPE)}")
 	logger.info(
 		f"训练配置: epochs={NUM_EPOCHS}, train_batch_size={BATCH_SIZE}, val_batch_size={VAL_BATCH_SIZE}, lr={LEARNING_RATE}, crop_size={TRAIN_CROP_SIZE}"
