@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from e2ecr import E2ECRConfig, build_e2ecr
-from dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_e2ecr_num_classes
+from e2ecr_dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_e2ecr_num_classes
 
 
 DATA_ROOT = Path("data") / "BRCA-M2C"
