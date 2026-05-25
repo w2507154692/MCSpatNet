@@ -16,8 +16,8 @@ from e2ecr import E2ECRConfig, build_e2ecr
 from e2ecr_dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_e2ecr_num_classes
 
 
-DATA_ROOT = Path("data") / "BRCA-M2C"
-DATASET_TYPE = "brca-m2c"
+DATA_ROOT = Path("data") / "CoNSeP_point"
+DATASET_TYPE = "consep"
 USE_CONSEP_FIVE_FOLD = False	# 对于CoNSeP数据集使用五折交叉验证
 CONSEP_FOLD_INDEX = 1	# 总共五折，使用第几折
 
@@ -245,7 +245,10 @@ def e2ecr_train(checkpoints_save_dir, logger):
 					# 3. 分类头给出真实类别的置信度。
 					# 距离越小越好，前景/分类分数越大越好，因此后两项在代价里用减号。
 					distance_matrix = torch.cdist(candidate_points, gt_points, p=2)
-					class_score_matrix = candidate_cls_probs[:, gt_labels]
+					# 这里需要显式按每个 GT 的类别去收集所有候选点的对应类别分数，
+					# 以得到 [候选数, GT数] 的矩阵；直接用高级索引会把维度顺序打乱。
+					gt_label_matrix = gt_labels.unsqueeze(0).expand(candidate_cls_probs.shape[0], -1)
+					class_score_matrix = torch.gather(candidate_cls_probs, dim=1, index=gt_label_matrix)
 					cost_matrix = ALPHA * distance_matrix - candidate_scores.unsqueeze(1) - class_score_matrix
 
 					# SciPy 的 linear_sum_assignment 会返回一组一对一匹配结果。
@@ -425,7 +428,10 @@ def e2ecr_train(checkpoints_save_dir, logger):
 						candidate_points = pred_points[candidate_indices]
 						candidate_cls_probs = cls_probs[candidate_indices]
 						distance_matrix = torch.cdist(candidate_points, gt_points, p=2)
-						class_score_matrix = candidate_cls_probs[:, gt_labels]
+						# 验证阶段保持与训练阶段一致的 gather 逻辑，
+						# 让分类代价矩阵的维度稳定为 [候选数, GT数]。
+						gt_label_matrix = gt_labels.unsqueeze(0).expand(candidate_cls_probs.shape[0], -1)
+						class_score_matrix = torch.gather(candidate_cls_probs, dim=1, index=gt_label_matrix)
 						cost_matrix = ALPHA * distance_matrix - candidate_scores.unsqueeze(1) - class_score_matrix
 
 						matched_candidate_rows, matched_gt_cols = linear_sum_assignment(cost_matrix.detach().cpu().numpy())
