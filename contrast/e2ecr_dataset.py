@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-from collections import OrderedDict
 import importlib
 import importlib.util
 from pathlib import Path
@@ -18,95 +17,6 @@ if importlib.util.find_spec("albumentations") is not None:
 	A = importlib.import_module("albumentations")
 else:
 	A = None
-
-
-class MoNuSACDataset(Dataset):
-	"""读取 MoNuSAC patch 检测数据。
-
-	数据来源：
-	- annotations/boxes.csv: 每行一个目标框，包含 split 和 image_path。
-	- metadata/classes.csv: 可选，仅在训练侧用于统计类别数。
-
-	返回格式与 torchvision detection API 保持一致：
-	- image: FloatTensor[C, H, W]，范围为 [0, 1]
-	- target: dict，包含 boxes、labels、image_id、area、iscrowd
-	"""
-
-	def __init__(self, data_root: str | Path, annotations_csv: str | Path, split: str) -> None:
-		self.data_root = Path(data_root)
-		self.annotations_csv = Path(annotations_csv)
-		self.split = split
-		self.samples = self._load_samples()
-
-		if not self.samples:
-			raise ValueError(f"split={split} 没有可用样本，请检查 {self.annotations_csv}")
-
-	def __len__(self) -> int:
-		return len(self.samples)
-
-	def __getitem__(self, index: int):
-		sample = self.samples[index]
-		image = Image.open(sample["image_full_path"]).convert("RGB")
-		image_tensor = F.convert_image_dtype(F.pil_to_tensor(image), torch.float32)
-
-		boxes = torch.tensor(sample["boxes"], dtype=torch.float32)
-		labels = torch.tensor(sample["labels"], dtype=torch.int64)
-		area = torch.tensor(sample["area"], dtype=torch.float32)
-		iscrowd = torch.zeros((labels.shape[0],), dtype=torch.int64)
-
-		target = {
-			"boxes": boxes,
-			"labels": labels,
-			"image_id": torch.tensor([index], dtype=torch.int64),
-			"area": area,
-			"iscrowd": iscrowd,
-		}
-		return image_tensor, target
-
-	def _load_samples(self) -> list[dict]:
-		grouped: OrderedDict[str, dict] = OrderedDict()
-		with self.annotations_csv.open("r", encoding="utf-8", newline="") as handle:
-			reader = csv.DictReader(handle)
-			for row in reader:
-				if row["split"] != self.split:
-					continue
-
-				image_path = row["image_path"]
-				sample = grouped.setdefault(
-					image_path,
-					{
-						"image_path": image_path,
-						"image_full_path": self.data_root / image_path,
-						"boxes": [],
-						"labels": [],
-						"area": [],
-					},
-				)
-
-				is_negative = int(row["is_negative"])
-				if is_negative:
-					continue
-
-				xmin = float(row["xmin"])
-				ymin = float(row["ymin"])
-				xmax = float(row["xmax"])
-				ymax = float(row["ymax"])
-				sample["boxes"].append([xmin, ymin, xmax, ymax])
-				sample["labels"].append(int(row["label_id"]))
-				sample["area"].append(max(0.0, xmax - xmin) * max(0.0, ymax - ymin))
-
-		formatted_samples: list[dict] = []
-		for sample in grouped.values():
-			if sample["boxes"]:
-				formatted_samples.append(sample)
-				continue
-
-			sample["boxes"] = torch.zeros((0, 4), dtype=torch.float32).tolist()
-			sample["labels"] = torch.zeros((0,), dtype=torch.int64).tolist()
-			sample["area"] = torch.zeros((0,), dtype=torch.float32).tolist()
-			formatted_samples.append(sample)
-
-		return formatted_samples
 
 
 class BRCAM2CE2ECRDataset(Dataset):
@@ -364,6 +274,113 @@ class CoNSePE2ECRDataset(BRCAM2CE2ECRDataset):
 		return cropped_image, cropped_points, cropped_labels
 
 
+class MoNuSACDataset(CoNSePE2ECRDataset):
+	"""读取 MoNuSAC_point 点标注数据，供 E2ECR 训练与评估使用。
+
+	数据来源：
+	- annotations/points.csv: 每行一个点，包含 split、image_path、x、y、label_id。
+	- images/: 与 image_path 对应的 patch 图像。
+
+	训练阶段沿用 CoNSeP 的随机裁剪策略；label_id 会转换为 0-based 类别索引。
+	"""
+
+	def __init__(
+		self,
+		data_root: str | Path,
+		phase: str,
+		crop_size: int = 384,
+		transform: bool = False,
+	) -> None:
+		self.use_five_fold = False
+		self.fold_index = None
+		self.data_root = Path(data_root)
+		self.phase = phase.strip().lower()
+		self.target_size = crop_size
+		self.transform = transform
+		if self.phase == "train" and self.transform and A is None:
+			raise ImportError("训练增强依赖 albumentations，请先安装: pip install albumentations")
+		self.train_transform = self._build_train_transform() if self.phase == "train" and self.transform else None
+		self.annotations_csv = self.data_root / "annotations" / "points.csv"
+		if not self.annotations_csv.is_file():
+			raise ValueError(f"点标注文件不存在: {self.annotations_csv}")
+		self.points_by_image, self.image_names = self._load_annotations_index()
+		if not self.image_names:
+			raise ValueError(f"phase={self.phase} 没有可用样本，请检查 {self.annotations_csv}")
+
+	def __len__(self) -> int:
+		return len(self.image_names)
+
+	def __getitem__(self, index: int):
+		image_path = self.image_names[index]
+		image_full_path = self.data_root / image_path
+		if not image_full_path.is_file():
+			raise FileNotFoundError(f"图像不存在: {image_full_path}")
+
+		image = Image.open(image_full_path).convert("RGB")
+		image_np = np.asarray(image, dtype=np.float32) / 255.0
+		points, labels = self.points_by_image[image_path]
+		points = points.astype(np.float32, copy=True)
+		labels = labels.astype(np.int64, copy=True)
+
+		if self.phase == "train" and self.transform:
+			image_np, points = self._apply_train_transforms(image_np, points)
+			image_np, points, labels = self._apply_random_crop(image_np, points, labels, self.target_size)
+
+		image_np, points = self._resize_image_and_points(image_np, points)
+		image_tensor = torch.from_numpy(image_np.transpose(2, 0, 1)).float()
+		target = {
+			"points": torch.from_numpy(points).float(),
+			"labels": torch.from_numpy(labels).long(),
+			"image_id": torch.tensor(index, dtype=torch.long),
+			"image_name": image_path,
+		}
+		return image_tensor, target
+
+	def _load_annotations_index(self) -> tuple[dict[str, tuple[np.ndarray, np.ndarray]], list[str]]:
+		phase_to_split = {
+			"train": "train",
+			"val": "val",
+			"test": "test",
+		}
+		if self.phase not in phase_to_split:
+			raise ValueError(f"不支持的 phase: {self.phase}")
+		target_split = phase_to_split[self.phase]
+
+		raw_points: dict[str, list[tuple[float, float, int]]] = {}
+		image_names_set: set[str] = set()
+		with self.annotations_csv.open("r", encoding="utf-8", newline="") as handle:
+			reader = csv.DictReader(handle)
+			for row in reader:
+				if row["split"] != target_split:
+					continue
+
+				image_path = row["image_path"]
+				image_names_set.add(image_path)
+				if int(row["is_negative"]):
+					continue
+
+				label_id = int(row["label_id"])
+				if label_id < 1:
+					raise ValueError(f"MoNuSAC 前景 label_id 必须从 1 开始，实际为 {label_id}")
+				raw_points.setdefault(image_path, []).append(
+					(float(row["x"]), float(row["y"]), label_id - 1)
+				)
+
+		points_by_image: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+		for image_path in sorted(image_names_set):
+			entries = raw_points.get(image_path, [])
+			if entries:
+				entry_array = np.asarray(entries, dtype=np.float32)
+				points = entry_array[:, :2]
+				labels = entry_array[:, 2].astype(np.int64)
+			else:
+				points = np.zeros((0, 2), dtype=np.float32)
+				labels = np.zeros((0,), dtype=np.int64)
+			points_by_image[image_path] = (points, labels)
+
+		return points_by_image, sorted(image_names_set)
+
+
 def detection_collate_fn(batch):
 	images, targets = zip(*batch)
 	return list(images), list(targets)
@@ -398,6 +415,7 @@ def build_e2ecr_dataset(
 	dataset_registry = {
 		"brca-m2c": BRCAM2CE2ECRDataset,
 		"consep": CoNSePE2ECRDataset,
+		"monusac": MoNuSACDataset,
 	}
 	if dataset_type_normalized not in dataset_registry:
 		raise ValueError(
@@ -428,9 +446,56 @@ def get_e2ecr_num_classes(dataset_type: str) -> int:
 	class_registry = {
 		"brca-m2c": 3,
 		"consep": 3,
+		"monusac": 4,
 	}
 	if dataset_type_normalized not in class_registry:
 		raise ValueError(
 			f"不支持的数据集类型: {dataset_type}。当前支持: {', '.join(sorted(class_registry.keys()))}"
 		)
 	return class_registry[dataset_type_normalized]
+
+
+_E2ECR_CLASS_VIZ = {
+	"brca-m2c": {
+		"names": ["inflammatory", "epithelial", "stromal"],
+		"gt_colors": ["lime", "orange", "cyan"],
+		"pred_colors": ["blue", "red", "yellow"],
+	},
+	"consep": {
+		"names": ["inflammatory", "epithelial", "stromal"],
+		"gt_colors": ["lime", "orange", "cyan"],
+		"pred_colors": ["blue", "red", "yellow"],
+	},
+	"monusac": {
+		"names": ["Epithelial", "Lymphocyte", "Macrophage", "Neutrophil"],
+		"gt_colors": ["red", "lime", "blue", "yellow"],
+		"pred_colors": ["darkred", "green", "navy", "gold"],
+	},
+}
+
+
+def get_e2ecr_class_names(dataset_type: str) -> list[str]:
+	dataset_type_normalized = dataset_type.strip().lower()
+	if dataset_type_normalized not in _E2ECR_CLASS_VIZ:
+		raise ValueError(
+			f"不支持的数据集类型: {dataset_type}。当前支持: {', '.join(sorted(_E2ECR_CLASS_VIZ.keys()))}"
+		)
+	return list(_E2ECR_CLASS_VIZ[dataset_type_normalized]["names"])
+
+
+def get_e2ecr_gt_colors(dataset_type: str) -> list[str]:
+	dataset_type_normalized = dataset_type.strip().lower()
+	if dataset_type_normalized not in _E2ECR_CLASS_VIZ:
+		raise ValueError(
+			f"不支持的数据集类型: {dataset_type}。当前支持: {', '.join(sorted(_E2ECR_CLASS_VIZ.keys()))}"
+		)
+	return list(_E2ECR_CLASS_VIZ[dataset_type_normalized]["gt_colors"])
+
+
+def get_e2ecr_pred_colors(dataset_type: str) -> list[str]:
+	dataset_type_normalized = dataset_type.strip().lower()
+	if dataset_type_normalized not in _E2ECR_CLASS_VIZ:
+		raise ValueError(
+			f"不支持的数据集类型: {dataset_type}。当前支持: {', '.join(sorted(_E2ECR_CLASS_VIZ.keys()))}"
+		)
+	return list(_E2ECR_CLASS_VIZ[dataset_type_normalized]["pred_colors"])

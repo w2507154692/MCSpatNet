@@ -12,7 +12,14 @@ from torchvision.transforms import functional as TF
 from tqdm.auto import tqdm
 
 from e2ecr import E2ECRConfig, build_e2ecr
-from e2ecr_dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_e2ecr_num_classes
+from e2ecr_dataset import (
+	build_e2ecr_dataset,
+	e2ecr_collate_fn,
+	get_e2ecr_class_names,
+	get_e2ecr_gt_colors,
+	get_e2ecr_num_classes,
+	get_e2ecr_pred_colors,
+)
 
 
 DATA_ROOT = Path("data") / "CoNSeP_point"
@@ -32,9 +39,6 @@ INFERENCE_ADAPTIVE_NMS_SCALE = 0.8
 RESULTS_FILE_NAME = "test_results.txt"
 VISUALIZATION_DIR_NAME = "visualizations"
 PREDICTION_DIR_NAME = "predictions"
-CLASS_NAMES = ["inflammatory", "epithelial", "stromal"]
-CLASS_COLORS = ["lime", "orange", "cyan"]
-PREDICTION_COLORS = ["blue", "red", "yellow"]
 GT_VIS_SUFFIX = "_gt.png"
 PRED_VIS_SUFFIX = "_pred.png"
 
@@ -146,6 +150,8 @@ def e2ecr_test(out_dir, pth_file_path):
 					pred_points=pred_points,
 					pred_labels=pred_labels,
 					pred_scores=pred_scores,
+					gt_colors=get_e2ecr_gt_colors(DATASET_TYPE),
+					pred_colors=get_e2ecr_pred_colors(DATASET_TYPE),
 				)
 
 				top_scores = ", ".join(f"{score:.4f}" for score in pred_scores[:5].tolist()) if pred_scores.size > 0 else "None"
@@ -162,7 +168,8 @@ def e2ecr_test(out_dir, pth_file_path):
 	)
 	per_class_lines: list[str] = []
 	per_class_f1_values: list[float] = []
-	for class_index, class_name in enumerate(CLASS_NAMES):
+	class_names = get_e2ecr_class_names(DATASET_TYPE)
+	for class_index, class_name in enumerate(class_names):
 		class_summary = per_class_summary[class_index]
 		class_precision, class_recall, class_f1 = _compute_precision_recall_f1(
 			class_summary["tp"],
@@ -368,17 +375,28 @@ def _compute_precision_recall_f1(tp, fp, fn):
 
 
 
-def _visualize_points(image_tensor, gt_save_path, pred_save_path, gt_points, gt_labels, pred_points, pred_labels, pred_scores):
+def _visualize_points(
+	image_tensor,
+	gt_save_path,
+	pred_save_path,
+	gt_points,
+	gt_labels,
+	pred_points,
+	pred_labels,
+	pred_scores,
+	gt_colors,
+	pred_colors,
+):
 	# GT 和预测分成两张图保存，便于分别观察标注和模型输出。
 	gt_image = TF.to_pil_image(image_tensor)
 	gt_draw = ImageDraw.Draw(gt_image)
 	for point, label in zip(gt_points.tolist(), gt_labels.tolist()):
-		_draw_prediction_square(gt_draw, point, PREDICTION_COLORS[int(label)])
+		_draw_prediction_square(gt_draw, point, gt_colors[int(label)])
 
 	pred_image = TF.to_pil_image(image_tensor)
 	pred_draw = ImageDraw.Draw(pred_image)
 	for point, label in zip(pred_points.tolist(), pred_labels.tolist()):
-		_draw_prediction_square(pred_draw, point, PREDICTION_COLORS[int(label)])
+		_draw_prediction_square(pred_draw, point, pred_colors[int(label)])
 
 	gt_save_path = Path(gt_save_path)
 	pred_save_path = Path(pred_save_path)

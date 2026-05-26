@@ -7,8 +7,8 @@ import torch
 from datetime import datetime
 
 CHECKPOINTS_ROOT_DIR = './exp'      # 所有训练输出的根目录
-CHECKPOINTS_FOLDER_NAME = 'exp24_e2ecr_consep'     # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下
-SEED = 42
+CHECKPOINTS_FOLDER_NAME = 'exp25_e2ecr_consep'     # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下
+SEED = 203
 TYPE = 'e2ecr'
 
 
