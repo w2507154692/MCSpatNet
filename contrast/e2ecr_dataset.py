@@ -428,18 +428,18 @@ def get_e2ecr_num_classes(dataset_type: str) -> int:
 _E2ECR_CLASS_VIZ = {
 	"brca-m2c": {
 		"names": ["inflammatory", "epithelial", "stromal"],
-		"gt_colors": ["lime", "orange", "cyan"],
+		"gt_colors": ["blue", "red", "yellow"],
 		"pred_colors": ["blue", "red", "yellow"],
 	},
 	"consep": {
 		"names": ["inflammatory", "epithelial", "stromal"],
-		"gt_colors": ["lime", "orange", "cyan"],
+		"gt_colors": ["blue", "red", "yellow"],
 		"pred_colors": ["blue", "red", "yellow"],
 	},
 	"monusac": {
 		"names": ["Epithelial", "Lymphocyte", "Macrophage", "Neutrophil"],
 		"gt_colors": ["red", "lime", "blue", "yellow"],
-		"pred_colors": ["darkred", "green", "navy", "gold"],
+		"pred_colors": ["red", "lime", "blue", "yellow"],
 	},
 }
 
