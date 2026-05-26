@@ -15,17 +15,20 @@ from e2ecr import E2ECRConfig, build_e2ecr
 from e2ecr_dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_e2ecr_num_classes
 
 
-DATA_ROOT = Path("data") / "BRCA-M2C"
-DATASET_TYPE = "brca-m2c"
+DATA_ROOT = Path("data") / "CoNSeP_point"
+DATASET_TYPE = "consep"
 SPLIT = "test"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TEST_BATCH_SIZE = 1
 NUM_WORKERS = 0 if platform.system() == "Windows" else 4
-DISTANCE_THRESHOLD = 12.0
-INFERENCE_SCORE_THRESHOLD = 0.4
-INFERENCE_NMS_KERNEL_SIZE = 7
-INFERENCE_POINT_NMS_RADIUS = 10.0
+DISTANCE_THRESHOLD = 10.0
+INFERENCE_SCORE_THRESHOLD = 0.3
+INFERENCE_NMS_KERNEL_SIZE = 3
+INFERENCE_POINT_NMS_RADIUS = 5.0
+INFERENCE_ADAPTIVE_NMS_MIN_RADIUS = 2.5
+INFERENCE_ADAPTIVE_NMS_MAX_RADIUS = 8.0
+INFERENCE_ADAPTIVE_NMS_SCALE = 0.8
 RESULTS_FILE_NAME = "test_results.txt"
 VISUALIZATION_DIR_NAME = "visualizations"
 PREDICTION_DIR_NAME = "predictions"
@@ -280,14 +283,19 @@ def _decode_prediction_maps(output, model_config):
 		pred_points,
 		pred_labels,
 		final_scores,
-		radius=INFERENCE_POINT_NMS_RADIUS,
+		base_radius=INFERENCE_POINT_NMS_RADIUS,
+		min_radius=INFERENCE_ADAPTIVE_NMS_MIN_RADIUS,
+		max_radius=INFERENCE_ADAPTIVE_NMS_MAX_RADIUS,
+		radius_scale=INFERENCE_ADAPTIVE_NMS_SCALE,
 	)
 	return pred_points, pred_labels, final_scores
 
 
-def _apply_point_nms(pred_points, pred_labels, pred_scores, radius):
-	# 点级 NMS 直接作用在回归后的最终点坐标上，而不是像素分数图上。
-	# 这样能更有效地去掉“分数图上分开、但回归后挤到一起”的重复预测。
+def _apply_point_nms(pred_points, pred_labels, pred_scores, base_radius, min_radius, max_radius, radius_scale):
+	# 自适应点级 NMS 仍然作用在回归后的最终点坐标上，
+	# 但不再对所有区域使用同一个固定半径。
+	# 这里使用“同类别最近邻距离”估计局部密度：
+	# 稠密区域最近邻更近，抑制半径会自动变小；稀疏区域则会恢复到更大的半径。
 	if pred_points.shape[0] <= 1:
 		return pred_points, pred_labels, pred_scores
 
@@ -304,8 +312,15 @@ def _apply_point_nms(pred_points, pred_labels, pred_scores, radius):
 		distances = torch.norm(pred_points[other_indices] - current_point, dim=1)
 		same_class_mask = pred_labels[other_indices] == pred_labels[current_index]
 
+		# 用当前点到同类别最近邻的距离估计局部间距，再映射到自适应抑制半径。
+		same_class_distances = distances[same_class_mask]
+		if same_class_distances.numel() > 0:
+			adaptive_radius = float(torch.clamp(same_class_distances.min() * radius_scale, min=min_radius, max=max_radius).item())
+		else:
+			adaptive_radius = float(base_radius)
+
 		# 只有“同类别且距离过近”的点才会被压制，避免误删相邻但类别不同的细胞。
-		keep_other_mask = (distances > radius) | (~same_class_mask)
+		keep_other_mask = (distances > adaptive_radius) | (~same_class_mask)
 		remaining_indices = other_indices[keep_other_mask]
 
 	kept_indices_tensor = torch.stack(kept_indices)

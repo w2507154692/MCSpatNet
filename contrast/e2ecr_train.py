@@ -22,32 +22,73 @@ USE_CONSEP_FIVE_FOLD = False	# 对于CoNSeP数据集使用五折交叉验证
 CONSEP_FOLD_INDEX = 1	# 总共五折，使用第几折
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-NUM_EPOCHS = 100
+NUM_EPOCHS = 300
 BATCH_SIZE = 12
 VAL_BATCH_SIZE = 4
 NUM_WORKERS = 0 if platform.system() == "Windows" else 8
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 5e-5
 WEIGHT_DECAY = 1e-4
-MIN_LEARNING_RATE = 1e-6
+MIN_LEARNING_RATE = 5e-7
 EVAL_INTERVAL_EPOCHS = 1
 PRINT_FREQ = 10
 GRAD_CLIP_NORM = 5.0
 TRAIN_CROP_SIZE = 384
-MIN_CANDIDATES_NUM = 512
-MAX_CANDIDATES_NUM = 1500
+MIN_CANDIDATES_NUM = 960
+MAX_CANDIDATES_NUM = 2048
 TRAIN_CANDIDATE_MULTIPLIER = 16
 TRAIN_CANDIDATE_SCORE_THRESHOLD = 0.05
 ALPHA = 0.05
 BETA = 0.06
 FOCAL_GAMMA = 2.0
 LAMBDA_REG = 1e-3
-TRAIN_MATCH_DISTANCE_THRESHOLD = 16.0	# 训练期匈牙利匹配的最大允许距离，超过该距离的配对直接丢弃
-INFERENCE_SCORE_THRESHOLD = 0.4		# 预测置信度阈值
-INFERENCE_DISTANCE_THRESHOLD = 12.0		# 预测点正确的半径阈值
-INFERENCE_NMS_KERNEL_SIZE = 7	# 局部峰值的核半径（NMS前先筛掉一部分）
-INFERENCE_POINT_NMS_RADIUS = 10.0	# NMS 半径
+TRAIN_MATCH_DISTANCE_THRESHOLD = 14.0	# 训练期匈牙利匹配的最大允许距离，超过该距离的配对直接丢弃
+INFERENCE_SCORE_THRESHOLD = 0.3		# 预测置信度阈值
+INFERENCE_DISTANCE_THRESHOLD = 10.0		# 预测点正确的半径阈值
+INFERENCE_NMS_KERNEL_SIZE = 3	# 局部峰值的核半径（NMS前先筛掉一部分）
+INFERENCE_POINT_NMS_RADIUS = 5.0	# NMS 基准半径
+INFERENCE_ADAPTIVE_NMS_MIN_RADIUS = 2.5	# 稠密区域允许缩到的最小 NMS 半径
+INFERENCE_ADAPTIVE_NMS_MAX_RADIUS = 8.0	# 稀疏区域允许放大的最大 NMS 半径
+INFERENCE_ADAPTIVE_NMS_SCALE = 0.8	# 用最近邻间距映射自适应半径时的缩放系数
 CHECKPOINT_SAVE_INTERVAL = 25	# checkpoint保存间隔
 TRANSFORM = True	# 是否开启数据增强
+
+
+def _apply_adaptive_point_nms(pred_points, pred_labels, pred_scores):
+	# 自适应点级 NMS：
+	# 固定半径很难同时兼顾 CoNSeP 中的稠密区域和稀疏区域，
+	# 因此这里使用“同类别最近邻距离”估计局部间距，再动态调整抑制半径。
+	if pred_points.shape[0] <= 1:
+		return pred_points, pred_labels, pred_scores
+
+	remaining_indices = torch.argsort(pred_scores, descending=True)
+	kept_indices: list[torch.Tensor] = []
+	while remaining_indices.numel() > 0:
+		current_index = remaining_indices[0]
+		kept_indices.append(current_index)
+		if remaining_indices.numel() == 1:
+			break
+
+		other_indices = remaining_indices[1:]
+		current_point = pred_points[current_index].unsqueeze(0)
+		distances = torch.norm(pred_points[other_indices] - current_point, dim=1)
+		same_class_mask = pred_labels[other_indices] == pred_labels[current_index]
+		same_class_distances = distances[same_class_mask]
+		if same_class_distances.numel() > 0:
+			adaptive_radius = float(
+				torch.clamp(
+					same_class_distances.min() * INFERENCE_ADAPTIVE_NMS_SCALE,
+					min=INFERENCE_ADAPTIVE_NMS_MIN_RADIUS,
+					max=INFERENCE_ADAPTIVE_NMS_MAX_RADIUS,
+				).item()
+			)
+		else:
+			adaptive_radius = float(INFERENCE_POINT_NMS_RADIUS)
+
+		keep_other_mask = (distances > adaptive_radius) | (~same_class_mask)
+		remaining_indices = other_indices[keep_other_mask]
+
+	kept_indices_tensor = torch.stack(kept_indices)
+	return pred_points[kept_indices_tensor], pred_labels[kept_indices_tensor], pred_scores[kept_indices_tensor]
 
 def e2ecr_train(checkpoints_save_dir, logger):
 	"""E2ECR 训练入口。
@@ -487,26 +528,16 @@ def e2ecr_train(checkpoints_save_dir, logger):
 						decoded_pred_labels = decoded_pred_labels[keep_mask]
 						decoded_final_scores = decoded_final_scores[keep_mask]
 
-						# 第二阶段在回归后的最终点坐标上再做一次半径 NMS。
-						# 这样可以继续压掉那些虽然来自不同网格位置、但最终落在同一细胞附近的重复点。
-						remaining_indices = torch.argsort(decoded_final_scores, descending=True)
-						kept_indices: list[torch.Tensor] = []
-						while remaining_indices.numel() > 0:
-							current_index = remaining_indices[0]
-							kept_indices.append(current_index)
-							if remaining_indices.numel() == 1:
-								break
-
-							other_indices = remaining_indices[1:]
-							current_point = decoded_pred_points[current_index].unsqueeze(0)
-							distances = torch.norm(decoded_pred_points[other_indices] - current_point, dim=1)
-							same_class_mask = decoded_pred_labels[other_indices] == decoded_pred_labels[current_index]
-							keep_other_mask = (distances > INFERENCE_POINT_NMS_RADIUS) | (~same_class_mask)
-							remaining_indices = other_indices[keep_other_mask]
-
-						kept_indices_tensor = torch.stack(kept_indices)
-						decoded_pred_points = decoded_pred_points[kept_indices_tensor].detach().cpu().numpy()
-						decoded_pred_labels = decoded_pred_labels[kept_indices_tensor].detach().cpu().numpy()
+						# 第二阶段在回归后的最终点坐标上做自适应半径 NMS。
+						# 稠密区域自动缩小半径，稀疏区域自动放大半径，
+						# 比全局固定 NMS 更适合 CoNSeP 这种密度变化很大的数据。
+						decoded_pred_points, decoded_pred_labels, decoded_final_scores = _apply_adaptive_point_nms(
+							decoded_pred_points,
+							decoded_pred_labels,
+							decoded_final_scores,
+						)
+						decoded_pred_points = decoded_pred_points.detach().cpu().numpy()
+						decoded_pred_labels = decoded_pred_labels.detach().cpu().numpy()
 					else:
 						decoded_pred_points = gt_points.new_zeros((0, 2)).detach().cpu().numpy()
 						decoded_pred_labels = gt_labels.new_zeros((0,), dtype=torch.long).detach().cpu().numpy()

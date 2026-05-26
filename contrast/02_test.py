@@ -5,9 +5,9 @@ import shutil
 
 CHECKPOINTS_ROOT_DIR = './exp'   # 所有训练输出的根目录
 # 当前实验对应的子目录名称，最终模型权重会从 <checkpoints_root_dir>/<checkpoints_folder_name> 下读取。
-CHECKPOINTS_FOLDER_NAME = 'exp20_e2ecr_brcam2c'
+CHECKPOINTS_FOLDER_NAME = 'exp24_e2ecr_consep'
 EVAL_ROOT_DIR = './exp'
-EPOCH = 183
+EPOCH = 247
 TYPE = 'e2ecr'
 SUFFIX = ''   # 后缀，进行额外补充，默认为空
 
