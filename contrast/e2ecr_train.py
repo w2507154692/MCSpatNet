@@ -16,23 +16,23 @@ from e2ecr import E2ECRConfig, build_e2ecr
 from e2ecr_dataset import build_e2ecr_dataset, e2ecr_collate_fn, get_e2ecr_num_classes
 
 
-DATA_ROOT = Path("data") / "CoNSeP_point"
-DATASET_TYPE = "consep"
+DATA_ROOT = Path("data") / "MoNuSAC_point"
+DATASET_TYPE = "monusac"
 USE_CONSEP_FIVE_FOLD = False	# 对于CoNSeP数据集使用五折交叉验证
 CONSEP_FOLD_INDEX = 1	# 总共五折，使用第几折
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 NUM_EPOCHS = 300
-BATCH_SIZE = 12
+BATCH_SIZE = 8
 VAL_BATCH_SIZE = 4
 NUM_WORKERS = 0 if platform.system() == "Windows" else 8
-LEARNING_RATE = 5e-5
+LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-4
 MIN_LEARNING_RATE = 5e-7
 EVAL_INTERVAL_EPOCHS = 1
 PRINT_FREQ = 10
 GRAD_CLIP_NORM = 5.0
-TRAIN_CROP_SIZE = 384
+TRAIN_CROP_SIZE = 512
 MIN_CANDIDATES_NUM = 960
 MAX_CANDIDATES_NUM = 2048
 TRAIN_CANDIDATE_MULTIPLIER = 16
@@ -42,10 +42,10 @@ BETA = 0.06
 FOCAL_GAMMA = 2.0
 LAMBDA_REG = 1e-3
 TRAIN_MATCH_DISTANCE_THRESHOLD = 14.0	# 训练期匈牙利匹配的最大允许距离，超过该距离的配对直接丢弃
-INFERENCE_SCORE_THRESHOLD = 0.3		# 预测置信度阈值
-INFERENCE_DISTANCE_THRESHOLD = 10.0		# 预测点正确的半径阈值
-INFERENCE_NMS_KERNEL_SIZE = 3	# 局部峰值的核半径（NMS前先筛掉一部分）
-INFERENCE_POINT_NMS_RADIUS = 5.0	# NMS 基准半径
+INFERENCE_SCORE_THRESHOLD = 0.4		# 预测置信度阈值
+INFERENCE_DISTANCE_THRESHOLD = 12.0		# 预测点正确的半径阈值
+INFERENCE_NMS_KERNEL_SIZE = 5	# 局部峰值的核半径（NMS前先筛掉一部分）
+INFERENCE_POINT_NMS_RADIUS = 7.0	# NMS 基准半径
 INFERENCE_ADAPTIVE_NMS_MIN_RADIUS = 2.5	# 稠密区域允许缩到的最小 NMS 半径
 INFERENCE_ADAPTIVE_NMS_MAX_RADIUS = 8.0	# 稀疏区域允许放大的最大 NMS 半径
 INFERENCE_ADAPTIVE_NMS_SCALE = 0.8	# 用最近邻间距映射自适应半径时的缩放系数
