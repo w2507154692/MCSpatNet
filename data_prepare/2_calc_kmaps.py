@@ -39,12 +39,12 @@ if __name__ == "__main__":
         # 读取真值点图和真值二值掩码。
         print('img', img_path )
         img_name = os.path.basename(img_path)
-        gt_path = os.path.join(gt_dir,img_name.replace('.png','_gt_dots.npy'));
-        gt_dots=np.load(gt_path, allow_pickle=True)[:,:,1:].squeeze()
-        gt_dmap_path = os.path.join(gt_dir,img_name.replace('.png','.npy'));
-        gt_dmap=np.load(gt_dmap_path, allow_pickle=True)[:,:,1:].squeeze()
+        gt_path = os.path.join(gt_dir,img_name.replace('.png','_gt_dots.npy'))  
+        gt_dots=np.load(gt_path, allow_pickle=True)[:,:,1:].squeeze()   # [H, W, C]，细胞中心点图
+        gt_dmap_path = os.path.join(gt_dir,img_name.replace('.png','.npy'))
+        gt_dmap=np.load(gt_dmap_path, allow_pickle=True)[:,:,1:].squeeze()  # [H, W, C]，细胞中心高斯密度点图（膨胀）
         gt_dots_all = gt_dots.max(-1) # 各类别点图按通道取最大，得到整体检测点图。
-        gt_dmap = gt_dmap > 0
+        gt_dmap = gt_dmap > 0   # 为防止传入的是密度图（非二值），对其进行二值化
         gt_dmap_all = gt_dmap.max(-1) # 合并所有类别后的整体检测掩码。
         gt_dmap_all_comp = label(gt_dmap_all) # 对整体掩码做连通域标记，便于后续把 K-function 传播给该细胞区域内所有像素。
         gt_kmap_out_path = os.path.join(out_dir,img_name.replace('.png','_gt_kmap.npy')); # 输出文件路径。
@@ -57,7 +57,7 @@ if __name__ == "__main__":
         cells_x=[0]
         cells_mark=['1000']
 
-        # 将所有真实细胞的坐标和类别依次写入 cells_y、cells_x、cells_mark。
+        # KEY：将所有真实细胞的坐标和类别依次写入 cells_y、cells_x、cells_mark。
         for c in range(n_classes):
             c_points = np.where(gt_dots[:,:, c] > 0)
             if(len(c_points[0])>0):
@@ -65,7 +65,7 @@ if __name__ == "__main__":
                 cells_x = np.concatenate((cells_x, c_points[1]))
                 cells_mark =  cells_mark + [str(c+1)]*len(c_points[0])
 
-        # 初始化输出的 kmap，形状为 [H, W, Ck]。
+        # 初始化输出的 kmap，形状为 [H, W, Ck]。k是取得不同的半径得数量
         # 对于图中每个细胞，其所在连通域区域内的像素都会被赋同一个 K-function 向量。
         gt_kmap = np.zeros((gt_dots.shape[0],gt_dots.shape[1],r_classes_all))
 
@@ -75,6 +75,7 @@ if __name__ == "__main__":
             continue
 
         '''
+            KEY：
             遍历 c_points 中的每一个细胞：
                 将 cells_y 和 cells_x 的第一个位置替换为当前中心细胞坐标。
                 分别计算该中心细胞相对于各个类别的 K-function。

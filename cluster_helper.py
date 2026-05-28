@@ -63,11 +63,12 @@ def collect_features(model, simple_train_loader, feature_indx_list):
 
             del et_dmap_lst
 
+    print(features_list.shape)
     return features_list, coord_list, img_name_list
         
 def collect_features_by_class(model, simple_train_loader, feature_indx_list, n_classes):
     n_samples = len(simple_train_loader.dataset)
-    features_list = [[0]*n_samples for i in range(n_classes)]    # 为每个类别分别创建独立列表，避免多个类别引用同一对象；n_classes * [n_data]
+    features_list = [[0]*n_samples for i in range(n_classes)]    # 为每个类别分别创建独立列表，避免多个类别引用同一对象；n_classes * [n_data]，每个元素是一个高维特征向量
     coord_list = [[0]*n_samples for i in range(n_classes)] # 为每个类别分别保存每张图像中的细胞坐标；n_classes * [n_data]
     img_name_list = ['']*n_samples
     model.eval()
@@ -138,6 +139,7 @@ def cluster(features_list, coord_list, n_clusters, prev_centroids):
                 features = features_list[s][i]
             else:
                 features = np.concatenate((features, features_list[s][i]), axis=0)
+        print(features.shape)   # [N, 128]，这里的N是属于该类别s的细胞数目，128是特征向量的维度
 
         # 为了让相邻轮次的聚类结果更稳定，可以使用上一轮的聚类中心作为初始化
         if(prev_centroids is None):
