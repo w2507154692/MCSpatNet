@@ -13,14 +13,14 @@ from spatial_analysis_utils_v2_sh import *
 # 配置变量。
 
 # 配置数据输入/输出路径。
-root_dir = '../../MCSpatNet_datasets/CoNSeP_test'
+root_dir = '../data/MoNuSAC_point_MCSpatNet'
 image_dir= os.path.join(root_dir, 'images')
 gt_dir= os.path.join(root_dir, 'gt_custom')
 out_dir = os.path.join(root_dir, 'k_func_maps')
 
 # 配置 K function 计算参数。
 do_k_correction=True
-n_classes = 3
+n_classes = 4
 r_step = 15 # r 表示半径采样步长。
 r_range = range(0, 100, r_step)
 r_list = [*r_range]
