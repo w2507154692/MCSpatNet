@@ -19,37 +19,32 @@ in_root_dir = os.path.normpath(os.path.join(SCRIPT_DIR, "../data/MoNuSAC_point_M
 annotations_csv = os.path.join(in_root_dir, "annotations", "points.csv")
 DATA_SPLITS = ("train", "val", "test")
 
-# 原始类别索引的最大值。类别编号从 1 开始，0 作为背景保留。
-classes_max_indx = 4
-# 可视化颜色（与 data/MoNuSAC_point/可视化.ipynb 一致）
+# 参与生成的类别：label_id 1=Epithelial, 2=Lymphocyte；3/4 忽略。
+classes_max_indx = 2
+active_label_ids = {1, 2}
+# 可视化颜色
 color_set = {
     1: (255, 0, 0),
     2: (0, 255, 0),
-    3: (0, 0, 255),
-    4: (255, 255, 0),
 }
-# 四类细胞 1:1 映射，不做合并。
+# 保留类别 1:1 映射，不做合并。
 class_group_mapping_dict = {
     1: [1],
     2: [2],
-    3: [3],
-    4: [4],
 }
-n_grouped_class_channels = 5  # 4 个类别加上背景
+n_grouped_class_channels = classes_max_indx + 1  # 2 个类别 + 背景通道 0
 # 图像缩放比例。原始 patch 与细胞中心坐标会按相同比例缩小。
 img_scale = 1.0
 remove_duplicates = False  # 若为 True，则去除 5 像素邻域内重复标注的细胞点。
 """
-原始细胞类别：
+原始细胞类别（CSV label_id）：
           1 = epithelial
 	      2 = lymphocyte
-	      3 = macrophage
-	      4 = neutrophil
-分组后的细胞类别：
+	      3 = macrophage      （本脚本忽略）
+	      4 = neutrophil      （本脚本忽略）
+输出仅保留：
 	      1 = epithelial
 	      2 = lymphocyte
-	      3 = macrophage
-	      4 = neutrophil
 """
 
 """
@@ -76,16 +71,19 @@ def csv_image_path_to_fs_path(csv_image_path):
 
 
 def load_points_by_image(csv_path):
-    """按磁盘相对路径聚合点标注，跳过 is_negative=1 的样本。"""
+    """按磁盘相对路径聚合点标注，跳过 is_negative=1 及 active_label_ids 之外的类别。"""
     grouped = defaultdict(list)
     with open(csv_path, "r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
             if int(row["is_negative"]):
                 continue
+            label_id = int(row["label_id"])
+            if label_id not in active_label_ids:
+                continue
             fs_image_path = csv_image_path_to_fs_path(row["image_path"])
             grouped[fs_image_path].append(
-                (float(row["x"]), float(row["y"]), int(row["label_id"]))
+                (float(row["x"]), float(row["y"]), label_id)
             )
     return grouped
 
