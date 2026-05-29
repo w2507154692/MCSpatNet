@@ -13,7 +13,7 @@ from spatial_analysis_utils_v2_sh import *
 # 配置变量。
 
 # 配置数据输入/输出路径。
-root_dir = '../data/MoNuSAC_point_MCSpatNet'
+root_dir = '../data/MoNuSAC_point_MCSpatNet/val'
 image_dir= os.path.join(root_dir, 'images')
 gt_dir= os.path.join(root_dir, 'gt_custom')
 out_dir = os.path.join(root_dir, 'k_func_maps')

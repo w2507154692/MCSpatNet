@@ -24,12 +24,39 @@ import matplotlib.pyplot as plt
 # In[310]:
 
 
-pandas2ri.activate()
+try:
+    pandas2ri.activate()
+except DeprecationWarning:
+    from rpy2.robjects import conversion as rconversion
+    from rpy2.robjects import default_converter
+    from rpy2.robjects import numpy2ri
+    rconversion.set_conversion(
+        default_converter + pandas2ri.converter + numpy2ri.converter
+    )
 base = importr('base')
-spatstat = importr('spatstat')
+# spatstat 3.x：几何函数在 spatstat.geom，探索统计在 spatstat.explore
+importr('spatstat')
+spatstat_geom = importr('spatstat.geom')
+spatstat_explore = importr('spatstat.explore')
 rlist = ri.baseenv['list']
 rnull = ri.NULL
 rcmd = pr.R(use_numpy=True)
+
+
+def _as_float_vector(values):
+    """将坐标转为 R FloatVector（兼容 numpy 与 list）。"""
+    if isinstance(values, np.ndarray):
+        return rfc(np.asarray(values, dtype=float).tolist())
+    return rfc(list(values))
+
+
+def _coord_range(values):
+    """计算坐标范围，供 owin 使用。"""
+    if isinstance(values, np.ndarray):
+        return rfc([float(values.min()), float(values.max())])
+    vals = [float(v) for v in values]
+    return rfc([min(vals), max(vals)])
+
 
 def ppp(x, y, marks, window_xrange=None, window_yrange=None):
     '''
@@ -52,15 +79,28 @@ def ppp(x, y, marks, window_xrange=None, window_yrange=None):
     >>> r.print(pp)
     '''
     pp = {}
-    if not window_xrange:
-        window_xrange=rfc([robj.r.min(rfc(x)), robj.r.max(rfc(x))])
-    if not window_yrange:
-        window_yrange=rfc([robj.r.min(rfc(y)), robj.r.max(rfc(y))])
-        
-    pp['ppp'] = spatstat.ppp(x=rfc(x), y=rfc(y), 
-                             window=spatstat.owin(xrange=window_xrange, 
-                                                  yrange=window_yrange), 
-                             marks=rfctc(marks))
+    robj.r.assign(".px", _as_float_vector(x))
+    robj.r.assign(".py", _as_float_vector(y))
+    robj.r.assign(".marks", rfctc(marks))
+    if window_xrange and window_yrange:
+        robj.r.assign(".xr", window_xrange)
+        robj.r.assign(".yr", window_yrange)
+        robj.r(
+            ".mcspat_pp <<- spatstat.geom::ppp("
+            "x=.px, y=.py, "
+            "window=spatstat.geom::owin(xrange=.xr, yrange=.yr), "
+            "marks=.marks)"
+        )
+    else:
+        robj.r(
+            ".mcspat_pp <<- spatstat.geom::ppp("
+            "x=.px, y=.py, "
+            "window=spatstat.geom::owin("
+            "xrange=c(min(.px), max(.px)), yrange=c(min(.py), max(.py))), "
+            "marks=.marks)"
+        )
+    # 保留 R 中 ppp 对象的 S3 类型，避免 rpy2 转成 Python list 后丢失 class。
+    pp["ppp"] = ".mcspat_pp"
     pp['coor'] = [x] + [y]
     pp['marks'] = marks
     return pp
@@ -88,9 +128,9 @@ def Gest(pp, r=None, correction='km', plot=True):
     '''
     r_ppp = pp['ppp']
     if r:
-        r_Gest = spatstat.Gest(r_ppp, r=rfc(r), correction=correction)
+        r_Gest = spatstat_explore.Gest(r_ppp, r=rfc(r), correction=correction)
     else:
-        r_Gest = spatstat.Gest(r_ppp, correction=correction)
+        r_Gest = spatstat_explore.Gest(r_ppp, correction=correction)
     
     r_used = r_Gest['r']
     G_val_theo = r_Gest['theo']
@@ -129,9 +169,9 @@ def Kest(pp, r=None, correction='iso', plot=True):
     '''
     r_ppp = pp['ppp']
     if r:
-        r_Kest = spatstat.Kest(r_ppp, r=rfc(r), correction=correction)
+        r_Kest = spatstat_explore.Kest(r_ppp, r=rfc(r), correction=correction)
     else:
-        r_Kest = spatstat.Kest(r_ppp, correction=correction)
+        r_Kest = spatstat_explore.Kest(r_ppp, correction=correction)
     
     r_used = r_Kest['r']
     K_val_theo = r_Kest['theo']
@@ -172,9 +212,9 @@ def Gcross(pp, i, j, r=None, correction='km', plot=True):
     '''
     r_ppp = pp['ppp']
     if r:
-        r_Gcross = spatstat.Gcross(r_ppp, r=rfc(r), i=i, j=j, correction=correction)
+        r_Gcross = spatstat_explore.Gcross(r_ppp, r=rfc(r), i=i, j=j, correction=correction)
     else:
-        r_Gcross = spatstat.Gcross(r_ppp, i=i, j=j, correction=correction)
+        r_Gcross = spatstat_explore.Gcross(r_ppp, i=i, j=j, correction=correction)
     
     r_used = r_Gcross['r']
     G_val_theo = r_Gcross['theo']
@@ -213,11 +253,17 @@ def Kcross(pp, i, j, r=None, correction='iso', plot=True):
     >>> pp = ppp(x, y, marks)
     >>> Kcross(pp, i='a', j='b',  plot=True)
     '''
-    r_ppp = pp['ppp']
     if r:
-        r_Kcross = spatstat.Kcross(r_ppp, r=rfc(r), i=i, j=j, correction=correction)
+        robj.r.assign(".r", rfc(r))
+        r_Kcross = robj.r(
+            f'spatstat.explore::Kcross(X=.mcspat_pp, r=.r, i="{i}", j="{j}", '
+            f'correction="{correction}")'
+        )
     else:
-        r_Kcross = spatstat.Kcross(r_ppp, i=i, j=j, correction=correction)
+        r_Kcross = robj.r(
+            f'spatstat.explore::Kcross(X=.mcspat_pp, i="{i}", j="{j}", '
+            f'correction="{correction}")'
+        )
     
     r_used = r_Kcross['r']
     K_val_theo = r_Kcross['theo']
@@ -269,9 +315,9 @@ def envelop(pp, fun='Kest', i=None, j=None, r=None, correction=None, global_var=
         correction = rnull
     
     if not r:
-        r_envelop = spatstat.envelope(r_ppp, fun=fun, i=i, j=j, correction=correction,fix_marks=True)
+        r_envelop = spatstat_explore.envelope(r_ppp, fun=fun, i=i, j=j, correction=correction,fix_marks=True)
     else:
-        r_envelop = spatstat.envelope(r_ppp, r=rfc(r), fun=fun, i=i, j=j, correction=correction,fix_marks=True)
+        r_envelop = spatstat_explore.envelope(r_ppp, r=rfc(r), fun=fun, i=i, j=j, correction=correction,fix_marks=True)
     r_used = r_envelop['r']
     enve_val_theo = r_envelop['theo']
     enve_val_samp = r_envelop['obs']
@@ -402,7 +448,7 @@ if __name__=="__main__":
 
     r_ppp = test_ppp['ppp']
     r = [0, 5, 10, 15, 20, 25]
-    r_Gest = spatstat.Gest(r_ppp, r=rfc(r))
+    r_Gest = spatstat_explore.Gest(r_ppp, r=rfc(r))
 
     plt.figure(figsize=(12, 10))
     plt.subplot(2, 2, 1)

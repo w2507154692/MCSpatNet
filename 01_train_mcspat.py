@@ -29,14 +29,24 @@ from cluster_helper import *
 # test_split_filepath = './data_splits/brca-m2c/val_split.txt'
 # epochs  = 450 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
 # ------------------------------------------------------
+# checkpoints_root_dir = './exp' # 所有训练输出的根目录。
+# checkpoints_folder_name = 'exp8_consep_no_cluster' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+# model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
+# clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
+# train_data_root = './data/CoNSeP_train'
+# test_data_root = './data/CoNSeP_train'   # 这是验证集，不是测试集！
+# train_split_filepath = './data_splits/consep/train_split.txt'
+# test_split_filepath = './data_splits/consep/val_split.txt'
+# epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
+# ------------------------------------------------------
 checkpoints_root_dir = './exp' # 所有训练输出的根目录。
-checkpoints_folder_name = 'exp8_consep_no_cluster' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+checkpoints_folder_name = 'test' # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
 model_param_path        = None;  # 用于继续训练的历史 checkpoint 路径。
 clustering_pseudo_gt_root = './MCSpatNet_epoch_subclasses' # 这个是干什么的？
-train_data_root = './data/CoNSeP_train'
-test_data_root = './data/CoNSeP_train'   # 这是验证集，不是测试集！
-train_split_filepath = './data_splits/consep/train_split.txt'
-test_split_filepath = './data_splits/consep/val_split.txt'
+train_data_root = './data/MoNuSAC_point_MCSpatNet/train'
+test_data_root = './data/MoNuSAC_point_MCSpatNet/val'   # 这是验证集，不是测试集！
+train_split_filepath = None
+test_split_filepath = None
 epochs  = 300 # 训练轮数。对于 CoNSeP 数据集建议使用 300。
 
 
@@ -44,7 +54,8 @@ use_k_function_loss = True
 use_subclass_loss = False
 
 
-cell_code = {1:'lymphocyte', 2:'tumor', 3:'stromal'}
+# cell_code = {1:'lymphocyte', 2:'tumor', 3:'stromal'}
+cell_code = {1: 'epithelial', 2: 'lymphocyte', 3: 'macrophage', 4: 'neutrophil'}
 
 feature_code = {'decoder':0, 'cell-detect':1, 'class':2, 'subclass':3, 'k-cell':4}
 
@@ -139,7 +150,7 @@ if __name__=="__main__":
     conv_init = 'he'
 
     n_channels = 3
-    n_classes = 3 # 细胞类别数（lymphocytes、tumor、stromal）。
+    n_classes = 4 # 细胞类别数（lymphocytes、tumor、stromal）。
     n_classes_out = n_classes + 1 # 输出类别数 = 细胞分类通道数 + 1 个细胞检测通道。
     class_indx = '1,2,3' # 真值标签中类别通道对应的索引。
     n_clusters = 5 # 每个类别内部进一步聚类得到的簇数。
