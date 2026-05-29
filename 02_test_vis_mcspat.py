@@ -43,11 +43,19 @@ if __name__ == "__main__":
     # 0: 淋巴细胞，对应蓝色
     # 1: 肿瘤细胞，对应红色
     # 2: 其他细胞，对应绿色
+    # 3: 中性粒细胞，对应黄色
+    # color_set = {
+    #     0: (0, 162, 232),
+    #     1: (255, 0, 0),
+    #     2: (0, 255, 0),
+    # }
     color_set = {
         0: (0, 162, 232),
         1: (255, 0, 0),
         2: (0, 255, 0),
+        3: (255, 255, 0),
     }
+    
 
     # 模型权重目录与测试结果输出目录。
     models_root_dir = os.path.join(checkpoints_root_dir, checkpoints_folder_name)
@@ -75,9 +83,9 @@ if __name__ == "__main__":
     initial_pad = 126  # 为保证 U-Net 边界对齐所做的初始 padding。
     interpolate = "False"  # 解码阶段是否使用插值。
     conv_init = "he"  # 卷积层初始化方式。
-    n_classes = 3  # 主分类头中的细胞类别数。
+    n_classes = 4  # 主分类头中的细胞类别数。
     n_classes_out = n_classes + 1  # 额外包含背景时的类别总数。
-    class_indx = "1,2,3"  # 参与测试的类别编号。
+    class_indx = "1,2,3,4"  # 参与测试的类别编号。
     class_weights = np.array([1, 1, 1])
     n_clusters = 5  # 每个主类别进一步细分的聚类数。
     n_classes2 = n_clusters * (n_classes)  # 子类别总数。
