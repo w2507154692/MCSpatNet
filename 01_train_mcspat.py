@@ -41,7 +41,7 @@ from cluster_helper import *
 # ------------------------------------------------------
 checkpoints_root_dir = "./exp"  # 所有训练输出的根目录。
 checkpoints_folder_name = (
-    "exp9_monusac"  # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
+    "exp10_monusac"  # 当前训练实例的输出文件夹名称，将创建在 <checkpoints_root_dir> 下。
 )
 model_param_path = None
 # 用于继续训练的历史 checkpoint 路径。
@@ -54,11 +54,11 @@ epochs = 300  # 训练轮数。对于 CoNSeP 数据集建议使用 300。
 
 
 use_k_function_loss = True
-use_subclass_loss = False
+use_subclass_loss = True
 
 
 # cell_code = {1:'lymphocyte', 2:'tumor', 3:'stromal'}
-cell_code = {1: "epithelial", 2: "lymphocyte", 3: "macrophage", 4: "neutrophil"}
+cell_code = {1: "epithelial", 2: "lymphocyte"}
 
 feature_code = {"decoder": 0, "cell-detect": 1, "class": 2, "subclass": 3, "k-cell": 4}
 
@@ -159,9 +159,9 @@ if __name__ == "__main__":
     conv_init = "he"
 
     n_channels = 3
-    n_classes = 4  # 细胞类别数（lymphocytes、tumor、stromal）。
+    n_classes = 2  # 细胞类别数（lymphocytes、tumor、stromal）。
     n_classes_out = n_classes + 1  # 输出类别数 = 细胞分类通道数 + 1 个细胞检测通道。
-    class_indx = "1,2,3,4"  # 真值标签中类别通道对应的索引。
+    class_indx = "1,2"  # 真值标签中类别通道对应的索引。
     n_clusters = 5  # 每个类别内部进一步聚类得到的簇数。
     n_classes2 = n_clusters * (n_classes)  # 细胞子类/聚类分类头的输出通道数。
 

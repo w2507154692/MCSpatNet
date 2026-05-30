@@ -9,10 +9,13 @@ from scipy import ndimage
 
 # 配置参数
 # data_dir 目录中同时包含真实标注和预测结果，默认已经先运行过 02_test_vis_mcspat.py 生成预测文件
-data_dir = './exp/exp8_consep_no_cluster_e295/'
+data_dir = './exp/exp10_monusac_e156/'
 
 max_dist_thresh = 6 # 在 1 到 max_dist_thresh 的像素距离阈值范围内计算 F-score；40x 下 mpp=0.254，20x 下 mpp=0.508，因此 6 px 约等于 3.048 微米，30 px 约等于 15.24 微米
 color_set = {'tp':(0,162,232),'fp':(0,255,0),'fn':(255,255,0)} 
+
+n_classes=2 # 细胞类别数
+n_classes_out = n_classes + 1 # 输出统计同时包含分类结果和整体检测结果
 
 def calc(g_dot, e_dot, class_indx, img_indx, img_name):
     '''
@@ -183,8 +186,6 @@ def eval(data_dir, out_dir):
 
 if __name__ == "__main__":
     out_dir= data_dir # 可按需修改输出目录
-    n_classes=3 # 细胞类别数
-    n_classes_out = n_classes + 1 # 输出统计同时包含分类结果和整体检测结果
 
     # 初始化全局统计量
     tp = np.zeros((n_classes_out, max_dist_thresh + 1))

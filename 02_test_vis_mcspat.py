@@ -26,11 +26,11 @@ from my_dataloader import CellsDataset
 # 所有训练输出的根目录。
 checkpoints_root_dir = "./exp"
 # 当前实验对应的子目录名称，最终模型权重会从 <checkpoints_root_dir>/<checkpoints_folder_name> 下读取。
-checkpoints_folder_name = "exp9_monusac"
+checkpoints_folder_name = "exp10_monusac"
 eval_root_dir = "./exp"
-epoch = 282  # 需要测试的 epoch。
+epoch = 156  # 需要测试的 epoch。
 visualize = True  # 是否输出预测结果的可视化图像。
-test_data_root = "./data/MoNuSAC_point_MCSpatNet"
+test_data_root = "./data/MoNuSAC_point_MCSpatNet/test"
 test_split_filepath = None
 
 if __name__ == "__main__":
@@ -83,9 +83,9 @@ if __name__ == "__main__":
     initial_pad = 126  # 为保证 U-Net 边界对齐所做的初始 padding。
     interpolate = "False"  # 解码阶段是否使用插值。
     conv_init = "he"  # 卷积层初始化方式。
-    n_classes = 4  # 主分类头中的细胞类别数。
+    n_classes = 2  # 主分类头中的细胞类别数。
     n_classes_out = n_classes + 1  # 额外包含背景时的类别总数。
-    class_indx = "1,2,3,4"  # 参与测试的类别编号。
+    class_indx = "1,2"  # 参与测试的类别编号。
     class_weights = np.array([1, 1, 1])
     n_clusters = 5  # 每个主类别进一步细分的聚类数。
     n_classes2 = n_clusters * (n_classes)  # 子类别总数。
