@@ -20,7 +20,7 @@ class Config(object):
 
     def __init__(self):
         # 随机种子，用于复现实验（DataLoader、增强、网络初始化等）
-        self.seed = 10
+        self.seed = 42
 
         # 是否启用 TensorBoard / stats.json 等日志
         self.logging = True
@@ -65,14 +65,14 @@ class Config(object):
         # 数据集名称，对应 dataset.py 中 get_dataset 的键（kumar / cpm17 / consep）
         self.dataset_name = "consep"
         # checkpoint 与训练日志保存目录
-        self.log_dir = "logs/"
+        self.log_dir = "../exp/exp27_HoverNet_consep"
 
         # 训练 / 验证 patch 目录（各目录下应为预处理好的 .npy 文件）
         self.train_dir_list = [
-            "train_patches_path"
+            "../data/CoNSeP_HoverNet/consep/train/540x540_164x164"
         ]
         self.valid_dir_list = [
-            "valid_patches_path"
+            "../data/CoNSeP_HoverNet/consep/valid/540x540_164x164"
         ]
 
         # 各阶段 input_shape（网络输入）与 mask_shape（监督图尺寸）
