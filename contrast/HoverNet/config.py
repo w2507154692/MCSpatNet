@@ -1,3 +1,11 @@
+"""
+config.py
+
+HoVer-Net 全局训练配置。
+集中定义随机种子、数据集、patch 尺寸、模型模式及 train/valid 路径等，
+并动态加载 models/hovernet/opt.py 中的 model_config。
+"""
+
 import importlib
 import random
 
@@ -8,46 +16,58 @@ from dataset import get_dataset
 
 
 class Config(object):
-    """Configuration file."""
+    """HoVer-Net 训练/验证的全局配置类。"""
 
     def __init__(self):
+        # 随机种子，用于复现实验（DataLoader、增强、网络初始化等）
         self.seed = 10
 
+        # 是否启用 TensorBoard / stats.json 等日志
         self.logging = True
 
-        # turn on debug flag to trace some parallel processing problems more easily
+        # 开启 debug 可关闭 DataLoader 多进程，便于追踪并行加载问题
         self.debug = False
 
         model_name = "hovernet"
-        model_mode = "original" # choose either `original` or `fast`
+        model_mode = "original"  # 可选 `original` 或 `fast`
 
         if model_mode not in ["original", "fast"]:
             raise Exception("Must use either `original` or `fast` as model mode")
 
-        nr_type = 5 # number of nuclear types (including background)
+        # 细胞核类型数（含背景）。CoNSeP 合并后为 5（背景 + 3 类细胞 + 1 合并类）
+        nr_type = 5
 
-        # whether to predict the nuclear type, availability depending on dataset!
+        # 是否预测细胞核类型；能否开启取决于数据集是否提供 type_map
         self.type_classification = True
 
-        # shape information - 
-        # below config is for original mode. 
-        # If original model mode is used, use [270,270] and [80,80] for act_shape and out_shape respectively
-        # If fast model mode is used, use [256,256] and [164,164] for act_shape and out_shape respectively
-        aug_shape = [540, 540] # patch shape used during augmentation (larger patch may have less border artefacts)
-        act_shape = [270, 270] # patch shape used as input to network - central crop performed after augmentation
-        out_shape = [80, 80] # patch shape at output of network
+        # ---------- patch 尺寸说明 ----------
+        # 以下默认配置对应 original 模式：
+        #   original：act_shape=[270,270]，out_shape=[80,80]
+        #   fast    ：act_shape=[256,256]，out_shape=[164,164]
+        # aug_shape：增强阶段使用的较大 patch，可减轻边界伪影
+        aug_shape = [540, 540]
+        # act_shape：送入网络的输入 patch（增强后中心裁剪）
+        act_shape = [270, 270]
+        # out_shape：网络输出 / 监督图对应的 patch 尺寸
+        out_shape = [80, 80]
 
         if model_mode == "original":
-            if act_shape != [270,270] or out_shape != [80,80]:
-                raise Exception("If using `original` mode, input shape must be [270,270] and output shape must be [80,80]")
+            if act_shape != [270, 270] or out_shape != [80, 80]:
+                raise Exception(
+                    "If using `original` mode, input shape must be [270,270] and output shape must be [80,80]"
+                )
         if model_mode == "fast":
-            if act_shape != [256,256] or out_shape != [164,164]:
-                raise Exception("If using `fast` mode, input shape must be [256,256] and output shape must be [164,164]")
+            if act_shape != [256, 256] or out_shape != [164, 164]:
+                raise Exception(
+                    "If using `fast` mode, input shape must be [256,256] and output shape must be [164,164]"
+                )
 
-        self.dataset_name = "consep" # extracts dataset info from dataset.py
-        self.log_dir = "logs/" # where checkpoints will be saved
+        # 数据集名称，对应 dataset.py 中 get_dataset 的键（kumar / cpm17 / consep）
+        self.dataset_name = "consep"
+        # checkpoint 与训练日志保存目录
+        self.log_dir = "logs/"
 
-        # paths to training and validation patches
+        # 训练 / 验证 patch 目录（各目录下应为预处理好的 .npy 文件）
         self.train_dir_list = [
             "train_patches_path"
         ]
@@ -55,12 +75,13 @@ class Config(object):
             "valid_patches_path"
         ]
 
+        # 各阶段 input_shape（网络输入）与 mask_shape（监督图尺寸）
         self.shape_info = {
             "train": {"input_shape": act_shape, "mask_shape": out_shape,},
             "valid": {"input_shape": act_shape, "mask_shape": out_shape,},
         }
 
-        # * parsing config to the running state and set up associated variables
+        # * 解析配置到运行态：加载数据集解析器，并导入对应模型的 opt 模块
         self.dataset = get_dataset(self.dataset_name)
 
         module = importlib.import_module(

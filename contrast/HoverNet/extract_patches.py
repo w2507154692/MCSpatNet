@@ -1,6 +1,9 @@
 """extract_patches.py
 
-Patch extraction script.
+HoVer-Net 训练用 patch 提取脚本。
+
+将整张 WSI/patch 图像与 .mat 标注切分为固定窗口大小的 .npy 文件，
+供 train_loader.FileLoader 直接加载。输出为 RGB + 标注通道堆叠格式。
 """
 
 import re
@@ -19,19 +22,23 @@ from dataset import get_dataset
 # -------------------------------------------------------------------------------------
 if __name__ == "__main__":
 
-    # Determines whether to extract type map (only applicable to datasets with class labels).
+    # 是否在标注中同时提取类型图（仅对带类别标签的数据集有效，如 CoNSeP）
     type_classification = True
 
+    # 滑窗 patch 尺寸 [高, 宽]（与 config.py 中 aug_shape 对应，通常 540×540）
     win_size = [540, 540]
+    # 滑窗步长 [高, 宽]（决定 patch 重叠程度）
     step_size = [164, 164]
-    extract_type = "mirror"  # Choose 'mirror' or 'valid'. 'mirror'- use padding at borders. 'valid'- only extract from valid regions.
+    # 边界处理方式：'mirror' 对边界镜像 padding；'valid' 仅提取完全在图像内的区域
+    extract_type = "mirror"
 
-    # Name of dataset - use Kumar, CPM17 or CoNSeP.
-    # This used to get the specific dataset img and ann loading scheme from dataset.py
+    # 数据集名称，可选 kumar / cpm17 / consep
+    # 用于从 dataset.py 获取对应的 load_img / load_ann 实现
     dataset_name = "consep"
     save_root = "dataset/training_data/%s/" % dataset_name
 
-    # a dictionary to specify where the dataset path should be
+    # 各 split 的图像与标注路径配置
+    # 键：img / ann -> (文件后缀, 目录路径)
     dataset_info = {
         "train": {
             "img": (".png", "dataset/CoNSeP/Train/Images/"),
@@ -43,6 +50,7 @@ if __name__ == "__main__":
         },
     }
 
+    # 转义 glob 路径中的方括号，避免被当作字符类
     patterning = lambda x: re.sub("([\[\]])", "[\\1]", x)
     parser = get_dataset(dataset_name)
     xtractor = PatchExtractor(win_size, step_size)
@@ -50,6 +58,7 @@ if __name__ == "__main__":
         img_ext, img_dir = split_desc["img"]
         ann_ext, ann_dir = split_desc["ann"]
 
+        # 输出目录命名含 patch 尺寸与步长，便于区分不同提取配置
         out_dir = "%s/%s/%s/%dx%d_%dx%d/" % (
             save_root,
             dataset_name,
@@ -59,8 +68,9 @@ if __name__ == "__main__":
             step_size[0],
             step_size[1],
         )
+        # 以标注文件列表为驱动，保证每张图都有对应 .mat
         file_list = glob.glob(patterning("%s/*%s" % (ann_dir, ann_ext)))
-        file_list.sort()  # ensure same ordering across platform
+        file_list.sort()  # 固定排序，保证跨平台顺序一致
 
         rm_n_mkdir(out_dir)
 
@@ -77,7 +87,7 @@ if __name__ == "__main__":
                 "%s/%s%s" % (ann_dir, base_name, ann_ext), type_classification
             )
 
-            # *
+            # * 将 RGB 与标注在通道维堆叠，再按滑窗切 patch
             img = np.concatenate([img, ann], axis=-1)
             sub_patches = xtractor.extract(img, extract_type)
 
