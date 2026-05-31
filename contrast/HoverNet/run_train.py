@@ -2,12 +2,12 @@
 
 HoVer-Net 主训练脚本。
 
-用法:
+usage:
   run_train.py [--gpu=<id>] [--view=<dset>]
   run_train.py (-h | --help)
   run_train.py --version
 
-选项:
+options:
   -h --help       显示帮助信息。
   --version       显示版本号。
   --gpu=<id>      指定使用的 GPU，多个 ID 用逗号分隔。[default: 0,1,2,3]
