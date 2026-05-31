@@ -121,7 +121,7 @@ def msge_loss(true, pred, focus):
 
     """
 
-    def get_sobel_kernel(size):
+    def get_sobel_kernel(size, device):
         """Get sobel kernel with a given size."""
         assert size % 2 == 1, "Must be odd, get size=%d" % size
 
@@ -129,14 +129,14 @@ def msge_loss(true, pred, focus):
             -size // 2 + 1,
             size // 2 + 1,
             dtype=torch.float32,
-            device="cuda",
+            device=device,
             requires_grad=False,
         )
         v_range = torch.arange(
             -size // 2 + 1,
             size // 2 + 1,
             dtype=torch.float32,
-            device="cuda",
+            device=device,
             requires_grad=False,
         )
         h, v = torch.meshgrid(h_range, v_range)
@@ -147,7 +147,7 @@ def msge_loss(true, pred, focus):
     ####
     def get_gradient_hv(hv):
         """For calculating gradient."""
-        kernel_h, kernel_v = get_sobel_kernel(5)
+        kernel_h, kernel_v = get_sobel_kernel(5, hv.device)
         kernel_h = kernel_h.view(1, 1, 5, 5)  # constant
         kernel_v = kernel_v.view(1, 1, 5, 5)  # constant
 

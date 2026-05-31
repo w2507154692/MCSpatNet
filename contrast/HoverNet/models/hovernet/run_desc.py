@@ -4,6 +4,7 @@ import torch
 import torch.nn.functional as F
 
 from misc.utils import center_pad_to_shape, cropping_center
+from run_utils.utils import get_device, get_model_core
 from .utils import crop_to_shape, dice_loss, mse_loss, msge_loss, xentropy_loss
 
 from collections import OrderedDict
@@ -24,19 +25,21 @@ def train_step(batch_data, run_info):
 
     ####
     model = run_info["net"]["desc"]
+    model_core = get_model_core(model)
     optimizer = run_info["net"]["optimizer"]
+    device = run_info["net"].get("device", get_device())
 
     ####
     imgs = batch_data["img"]
     true_np = batch_data["np_map"]
     true_hv = batch_data["hv_map"]
 
-    imgs = imgs.to("cuda").type(torch.float32)  # to NCHW
+    imgs = imgs.to(device).type(torch.float32)  # to NCHW
     imgs = imgs.permute(0, 3, 1, 2).contiguous()
 
     # HWC
-    true_np = true_np.to("cuda").type(torch.int64)
-    true_hv = true_hv.to("cuda").type(torch.float32)
+    true_np = true_np.to(device).type(torch.int64)
+    true_hv = true_hv.to(device).type(torch.float32)
 
     true_np_onehot = (F.one_hot(true_np, num_classes=2)).type(torch.float32)
     true_dict = {
@@ -44,10 +47,10 @@ def train_step(batch_data, run_info):
         "hv": true_hv,
     }
 
-    if model.module.nr_types is not None:
+    if model_core.nr_types is not None:
         true_tp = batch_data["tp_map"]
-        true_tp = torch.squeeze(true_tp).to("cuda").type(torch.int64)
-        true_tp_onehot = F.one_hot(true_tp, num_classes=model.module.nr_types)
+        true_tp = torch.squeeze(true_tp).to(device).type(torch.int64)
+        true_tp_onehot = F.one_hot(true_tp, num_classes=model_core.nr_types)
         true_tp_onehot = true_tp_onehot.type(torch.float32)
         true_dict["tp"] = true_tp_onehot
 
@@ -60,7 +63,7 @@ def train_step(batch_data, run_info):
         [[k, v.permute(0, 2, 3, 1).contiguous()] for k, v in pred_dict.items()]
     )
     pred_dict["np"] = F.softmax(pred_dict["np"], dim=-1)
-    if model.module.nr_types is not None:
+    if model_core.nr_types is not None:
         pred_dict["tp"] = F.softmax(pred_dict["tp"], dim=-1)
 
     ####
@@ -114,6 +117,8 @@ def valid_step(batch_data, run_info):
     run_info, state_info = run_info
     ####
     model = run_info["net"]["desc"]
+    model_core = get_model_core(model)
+    device = run_info["net"].get("device", get_device())
     model.eval()  # infer mode
 
     ####
@@ -121,7 +126,7 @@ def valid_step(batch_data, run_info):
     true_np = batch_data["np_map"]
     true_hv = batch_data["hv_map"]
 
-    imgs_gpu = imgs.to("cuda").type(torch.float32)  # to NCHW
+    imgs_gpu = imgs.to(device).type(torch.float32)  # to NCHW
     imgs_gpu = imgs_gpu.permute(0, 3, 1, 2).contiguous()
 
     # HWC
@@ -133,7 +138,7 @@ def valid_step(batch_data, run_info):
         "hv": true_hv,
     }
 
-    if model.module.nr_types is not None:
+    if model_core.nr_types is not None:
         true_tp = batch_data["tp_map"]
         true_tp = torch.squeeze(true_tp).type(torch.int64)
         true_dict["tp"] = true_tp
@@ -145,7 +150,7 @@ def valid_step(batch_data, run_info):
             [[k, v.permute(0, 2, 3, 1).contiguous()] for k, v in pred_dict.items()]
         )
         pred_dict["np"] = F.softmax(pred_dict["np"], dim=-1)[..., 1]
-        if model.module.nr_types is not None:
+        if model_core.nr_types is not None:
             type_map = F.softmax(pred_dict["tp"], dim=-1)
             type_map = torch.argmax(type_map, dim=-1, keepdim=False)
             type_map = type_map.type(torch.float32)
@@ -161,19 +166,20 @@ def valid_step(batch_data, run_info):
             "pred_hv": pred_dict["hv"].cpu().numpy(),
         }
     }
-    if model.module.nr_types is not None:
+    if model_core.nr_types is not None:
         result_dict["raw"]["true_tp"] = true_dict["tp"].numpy()
         result_dict["raw"]["pred_tp"] = pred_dict["tp"].cpu().numpy()
     return result_dict
 
 
 ####
-def infer_step(batch_data, model):
+def infer_step(batch_data, model, device=None):
 
     ####
     patch_imgs = batch_data
+    device = device or get_device()
 
-    patch_imgs_gpu = patch_imgs.to("cuda").type(torch.float32)  # to NCHW
+    patch_imgs_gpu = patch_imgs.to(device).type(torch.float32)  # to NCHW
     patch_imgs_gpu = patch_imgs_gpu.permute(0, 3, 1, 2).contiguous()
 
     ####

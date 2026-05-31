@@ -11,6 +11,21 @@ from torch.autograd import Variable
 
 
 ####
+def get_device():
+    """Return cuda device when available, otherwise cpu."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
+def get_model_core(model):
+    """Return the underlying module when wrapped by DataParallel."""
+    if isinstance(model, torch.nn.DataParallel):
+        return model.module
+    return model
+
+
+####
 def convert_pytorch_checkpoint(net_state_dict):
     variable_name_list = list(net_state_dict.keys())
     is_in_parallel_mode = all(v.split(".")[0] == "module" for v in variable_name_list)
@@ -41,7 +56,8 @@ def check_manual_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
 
     print("Using manual seed: {seed}".format(seed=seed))
     return

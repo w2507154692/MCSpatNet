@@ -44,6 +44,7 @@ from run_utils.utils import (
     check_manual_seed,
     colored,
     convert_pytorch_checkpoint,
+    get_device,
 )
 
 
@@ -230,8 +231,9 @@ class TrainManager(Config):
                 print("Detected Unknown Variables: \n", load_feedback[1])
 
             # * 在部分 DGX 单卡环境下，DataParallel 包装可能异常偏慢，原因待查 (?)
-            net_desc = DataParallel(net_desc)
-            net_desc = net_desc.to("cuda")
+            if self.use_cuda and torch.cuda.device_count() > 1:
+                net_desc = DataParallel(net_desc)
+            net_desc = net_desc.to(self.device)
             # print(net_desc) # * 是否打印完整网络结构，可按需取消注释
             optimizer, optimizer_args = net_info["optimizer"]
             optimizer = optimizer(net_desc.parameters(), **optimizer_args)
@@ -242,6 +244,7 @@ class TrainManager(Config):
                 "desc": net_desc,
                 "optimizer": optimizer,
                 "lr_scheduler": scheduler,
+                "device": self.device,
                 # TODO: 统一外部 hook 的 API
                 "extra_info": net_info["extra_info"],
             }
@@ -289,8 +292,15 @@ class TrainManager(Config):
     ####
     def run(self):
         """主入口：支持多阶段训练（phase_list）或交叉验证等扩展流程。"""
-        self.nr_gpus = 1
-        print('Detect #GPUS: %d' % self.nr_gpus)
+        self.use_cuda = torch.cuda.is_available()
+        self.device = get_device()
+        if self.use_cuda:
+            self.nr_gpus = max(1, torch.cuda.device_count())
+            print("Detect #GPUS: %d" % self.nr_gpus)
+            print("Using device: cuda")
+        else:
+            self.nr_gpus = 1
+            print("CUDA not available, using CPU for training.")
 
         phase_list = self.model_config["phase_list"]
         engine_opt = self.model_config["run_engine"]
@@ -319,5 +329,8 @@ if __name__ == "__main__":
             raise Exception('Use "train" or "valid" for --view.')
         trainer.view_dataset(args["--view"])
     else:
-        os.environ["CUDA_VISIBLE_DEVICES"] = args["--gpu"]
+        if torch.cuda.is_available():
+            os.environ["CUDA_VISIBLE_DEVICES"] = args["--gpu"]
+        else:
+            print("CUDA not available, ignoring --gpu and using CPU.")
         trainer.run()
