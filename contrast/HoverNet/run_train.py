@@ -36,6 +36,7 @@ from torch.utils.data import DataLoader
 
 from config import Config
 from dataloader.train_loader import FileLoader
+from misc.pretrained import load_pretrained_state_dict, resolve_pretrained_path
 from misc.utils import rm_n_mkdir
 from run_utils.engine import RunEngine
 from run_utils.utils import (
@@ -194,24 +195,31 @@ class TrainManager(Config):
             # summary_string(net_desc, (3, 270, 270), device='cpu')
 
             pretrained_path = net_info["pretrained"]
-            if pretrained_path is not None:
-                if pretrained_path == -1:
-                    # * 依赖日志目录命名规则；若日志格式变更，此逻辑可能失效
-                    pretrained_path = get_last_chkpt_path(prev_log_dir, net_name)
-                    net_state_dict = torch.load(pretrained_path)["desc"]
-                else:
-                    chkpt_ext = os.path.basename(pretrained_path).split(".")[-1]
-                    if chkpt_ext == "npz":
-                        net_state_dict = dict(np.load(pretrained_path))
-                        net_state_dict = {
-                            k: torch.from_numpy(v) for k, v in net_state_dict.items()
-                        }
-                    elif chkpt_ext == "tar":  # ! 假设 checkpoint 保存格式与本项目一致
-                        net_state_dict = torch.load(pretrained_path)["desc"]
+            hovernet_root = os.path.dirname(os.path.abspath(__file__))
 
+            if pretrained_path == -1:
+                # * 依赖日志目录命名规则；若日志格式变更，此逻辑可能失效
+                pretrained_path = get_last_chkpt_path(prev_log_dir, net_name)
+                net_state_dict = torch.load(pretrained_path)["desc"]
+            elif pretrained_path is not None:
+                pretrained_path = resolve_pretrained_path(
+                    pretrained_path,
+                    base_dir=hovernet_root,
+                    allow_default=prev_log_dir is None,
+                )
+                net_state_dict = load_pretrained_state_dict(pretrained_path)
+            elif prev_log_dir is None:
+                # 未显式指定时，第一阶段默认下载并加载 ImageNet 预训练 ResNet50
+                pretrained_path = resolve_pretrained_path(
+                    None, base_dir=hovernet_root, allow_default=True
+                )
+                net_state_dict = load_pretrained_state_dict(pretrained_path)
+
+            if pretrained_path is not None:
                 colored_word = colored(net_name, color="red", attrs=["bold"])
                 print(
-                    "Model `%s` pretrained path: %s" % (colored_word, pretrained_path)
+                    "Model `%s` pretrained path: %s"
+                    % (colored_word, pretrained_path)
                 )
 
                 # load_state_dict 返回 (missing keys, unexpected keys)
