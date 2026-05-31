@@ -73,7 +73,7 @@ def _prepare_patching(img, window_size, mask_size, return_src_top_corner=False):
     padb = last_h + win_size - im_h
     padr = last_w + win_size - im_w
 
-    img = np.lib.pad(img, ((padt, padb), (padl, padr), (0, 0)), "reflect")
+    img = np.pad(img, ((padt, padb), (padl, padr), (0, 0)), mode="reflect")
 
     # generating subpatches index from orginal
     coord_y = np.arange(0, last_h, step_size, dtype=np.int32)

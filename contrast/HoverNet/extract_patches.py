@@ -35,23 +35,23 @@ if __name__ == "__main__":
     # 数据集名称，可选 kumar / cpm17 / consep
     # 用于从 dataset.py 获取对应的 load_img / load_ann 实现
     dataset_name = "consep"
-    save_root = "dataset/training_data/%s/" % dataset_name
+    save_root = "../data/CoNSeP_HoverNet/"
 
     # 各 split 的图像与标注路径配置
     # 键：img / ann -> (文件后缀, 目录路径)
     dataset_info = {
         "train": {
-            "img": (".png", "dataset/CoNSeP/Train/Images/"),
-            "ann": (".mat", "dataset/CoNSeP/Train/Labels/"),
+            "img": (".png", "../data/CoNSeP_raw/Train/Images/"),
+            "ann": (".mat", "../data/CoNSeP_raw/Train/Labels/"),
         },
         "valid": {
-            "img": (".png", "dataset/CoNSeP/Test/Images/"),
-            "ann": (".mat", "dataset/CoNSeP/Test/Labels/"),
+            "img": (".png", "../data/CoNSeP_raw/Test/Images/"),
+            "ann": (".mat", "../data/CoNSeP_raw/Test/Labels/"),
         },
     }
 
     # 转义 glob 路径中的方括号，避免被当作字符类
-    patterning = lambda x: re.sub("([\[\]])", "[\\1]", x)
+    patterning = lambda x: re.sub(r"([\[\]])", r"[\1]", x)
     parser = get_dataset(dataset_name)
     xtractor = PatchExtractor(win_size, step_size)
     for split_name, split_desc in dataset_info.items():
