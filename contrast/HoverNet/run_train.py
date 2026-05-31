@@ -281,7 +281,7 @@ class TrainManager(Config):
     ####
     def run(self):
         """主入口：支持多阶段训练（phase_list）或交叉验证等扩展流程。"""
-        self.nr_gpus = torch.cuda.device_count()
+        self.nr_gpus = 1
         print('Detect #GPUS: %d' % self.nr_gpus)
 
         phase_list = self.model_config["phase_list"]
