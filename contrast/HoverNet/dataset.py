@@ -100,7 +100,7 @@ class __CoNSeP(__AbstractDataset):
             # CoNSeP 原始 7 类合并为论文使用的 3 类细胞 + 背景（见 Hover-Net 原文）
             # 若使用自有数据集，需按实际类别定义修改下列映射
             ann_type[(ann_type == 3) | (ann_type == 4)] = 3
-            ann_type[(ann_type == 5) | (ann_type == 6) | (ann_type == 7)] = 4
+            ann_type[(ann_type == 1) | (ann_type == 5) | (ann_type == 6) | (ann_type == 7)] = 4
 
             # 通道 0：实例 ID；通道 1：合并后的类型 ID
             ann = np.dstack([ann_inst, ann_type])
