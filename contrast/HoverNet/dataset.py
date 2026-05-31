@@ -96,11 +96,14 @@ class __CoNSeP(__AbstractDataset):
         ann_inst = sio.loadmat(path)["inst_map"]
         if with_type:
             ann_type = sio.loadmat(path)["type_map"]
+            ann_type_origin = ann_type.copy()
 
             # CoNSeP 原始 7 类合并为论文使用的 3 类细胞 + 背景（见 Hover-Net 原文）
             # 若使用自有数据集，需按实际类别定义修改下列映射
-            ann_type[(ann_type == 3) | (ann_type == 4)] = 3
-            ann_type[(ann_type == 1) | (ann_type == 5) | (ann_type == 6) | (ann_type == 7)] = 4
+            ann_type[(ann_type_origin == 2)] = 1
+            ann_type[(ann_type_origin == 3) | (ann_type_origin == 4)] = 2
+            ann_type[(ann_type_origin == 1) | (ann_type_origin == 5) | (ann_type_origin == 6) | (ann_type_origin == 7)] = 3
+            
 
             # 通道 0：实例 ID；通道 1：合并后的类型 ID
             ann = np.dstack([ann_inst, ann_type])
