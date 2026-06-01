@@ -205,6 +205,22 @@ def infer_step(batch_data, model, device=None):
 
 
 ####
+def _min_spatial_shape(*arrays):
+    """取多个数组在空间维 (H, W) 上的最小尺寸，用于可视化裁剪对齐。"""
+    hw_shapes = []
+    for arr in arrays:
+        if arr.ndim >= 4:
+            hw_shapes.append(arr.shape[-3:-1])
+        elif arr.ndim == 3:
+            hw_shapes.append(arr.shape[-2:])
+        elif arr.ndim == 2:
+            hw_shapes.append(arr.shape)
+        else:
+            hw_shapes.append(arr.shape[-2:])
+    return tuple(np.min(np.array(hw_shapes), axis=0))
+
+
+####
 def viz_step_output(raw_data, nr_types=None):
     """
     `raw_data` will be implicitly provided in the similar format as the 
@@ -217,8 +233,7 @@ def viz_step_output(raw_data, nr_types=None):
     if nr_types is not None:
         true_tp, pred_tp = raw_data["tp"]
 
-    aligned_shape = [list(imgs.shape), list(true_np.shape), list(pred_np.shape)]
-    aligned_shape = np.min(np.array(aligned_shape), axis=0)[1:3]
+    aligned_shape = _min_spatial_shape(imgs, true_np, pred_np)
 
     cmap = plt.get_cmap("jet")
 

@@ -245,7 +245,6 @@ class TrainManager(Config):
                 "desc": net_desc,
                 "optimizer": optimizer,
                 "lr_scheduler": scheduler,
-                "device": self.device,
                 # TODO: 统一外部 hook 的 API
                 "extra_info": net_info["extra_info"],
             }

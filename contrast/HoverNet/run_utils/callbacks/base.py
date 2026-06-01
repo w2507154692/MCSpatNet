@@ -92,8 +92,12 @@ class PeriodicSaver(BaseCallbacks):
         for net_name, net_info in state.run_info.items():
             net_checkpoint = {}
             for key, value in net_info.items():
-                if key != "extra_info":
-                    net_checkpoint[key] = value.state_dict()
+                if key == "extra_info":
+                    continue
+                # 仅保存带 state_dict 的对象（模型/优化器/调度器等）
+                if not hasattr(value, "state_dict"):
+                    continue
+                net_checkpoint[key] = value.state_dict()
             torch.save(
                 net_checkpoint,
                 "%s/%s_epoch=%d.tar" % (state.log_dir, net_name, state.curr_epoch),
@@ -145,8 +149,11 @@ class ConditionalSaver(BaseCallbacks):
         for net_name, net_info in state.run_info.items():
             net_checkpoint = {}
             for key, value in net_info.items():
-                if key != "extra_info":
-                    net_checkpoint[key] = value.state_dict()
+                if key == "extra_info":
+                    continue
+                if not hasattr(value, "state_dict"):
+                    continue
+                net_checkpoint[key] = value.state_dict()
             torch.save(
                 net_checkpoint,
                 "%s/%s_best=[%s].tar" % (state.log_dir, net_name, self.metric_name),

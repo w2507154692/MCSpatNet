@@ -28,18 +28,26 @@ def fig2data(fig, dpi=180):
 
 
 ####
+def _to_python_scalar(value):
+    """将 numpy 标量转为原生 Python 类型，便于 json.dump。"""
+    if hasattr(value, "item"):
+        return value.item()
+    return value
+
+
+####
 class _Scalar(object):
     @staticmethod
     def to_console(value):
-        return "%0.5f" % value
+        return "%0.5f" % float(_to_python_scalar(value))
 
     @staticmethod
     def to_json(value):
-        return value
+        return _to_python_scalar(value)
 
     @staticmethod
     def to_tensorboard(value):
-        return "scalar", value
+        return "scalar", _to_python_scalar(value)
 
 
 ####
