@@ -38,7 +38,7 @@ def train_step(batch_data, run_info):
     imgs = imgs.permute(0, 3, 1, 2).contiguous()
 
     # HWC
-    true_np = true_np.to(device).type(torch.int64)
+    true_np = true_np.to(device).type(torch.int64).clamp(0, 1)
     true_hv = true_hv.to(device).type(torch.float32)
 
     true_np_onehot = (F.one_hot(true_np, num_classes=2)).type(torch.float32)
@@ -50,6 +50,7 @@ def train_step(batch_data, run_info):
     if model_core.nr_types is not None:
         true_tp = batch_data["tp_map"]
         true_tp = torch.squeeze(true_tp).to(device).type(torch.int64)
+        true_tp = true_tp.clamp(0, model_core.nr_types - 1)
         true_tp_onehot = F.one_hot(true_tp, num_classes=model_core.nr_types)
         true_tp_onehot = true_tp_onehot.type(torch.float32)
         true_dict["tp"] = true_tp_onehot

@@ -122,6 +122,7 @@ class TrainManager(Config):
             file_list,
             mode=run_mode,
             with_type=self.type_classification,
+            nr_types=getattr(self, "nr_type", None),
             # 单进程时直接在主进程初始化 augmentor；多进程时由 worker_init_fn 初始化
             setup_augmentor=nr_procs == 0,
             target_gen=target_gen,

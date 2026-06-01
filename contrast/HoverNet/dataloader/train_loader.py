@@ -43,6 +43,7 @@ class FileLoader(torch.utils.data.Dataset):
         mode: 'train' 或 'valid'，决定增强策略
         setup_augmentor: 是否在 __init__ 中立即初始化增强器（多进程时由 worker_init_fn 延迟初始化）
         target_gen: (target_gen_func, target_gen_kwargs) 元组，用于生成 HoVer-Net 训练 target
+        nr_types: 类型类别数（含背景），用于校验/裁剪 tp_map，需与 config.nr_type 一致
     """
 
     def __init__(
@@ -54,11 +55,13 @@ class FileLoader(torch.utils.data.Dataset):
         mode="train",
         setup_augmentor=True,
         target_gen=None,
+        nr_types=None,
     ):
         assert input_shape is not None and mask_shape is not None
         self.mode = mode
         self.info_list = file_list
         self.with_type = with_type
+        self.nr_types = nr_types
         self.mask_shape = mask_shape
         self.input_shape = input_shape
         self.id = 0
@@ -66,6 +69,7 @@ class FileLoader(torch.utils.data.Dataset):
         self.target_gen_kwargs = target_gen[1]
         self.shape_augs = None
         self.input_augs = None
+        self._type_warned = False
         if setup_augmentor:
             self.setup_augmentor(0, 0)
         return
@@ -78,6 +82,23 @@ class FileLoader(torch.utils.data.Dataset):
         self.input_augs = self.__get_input_augmentation(self.mode)
         self.id = self.id + worker_id
         return
+
+    def _sanitize_type_map(self, type_map):
+        """将 tp_map 限制在 [0, nr_types-1]，避免 one_hot 触发 CUDA assert。"""
+        if self.nr_types is None:
+            return type_map
+        max_label = int(type_map.max())
+        min_label = int(type_map.min())
+        if min_label < 0 or max_label >= self.nr_types:
+            if not self._type_warned:
+                print(
+                    "WARNING: type_map labels in [%d, %d] exceed nr_types=%d. "
+                    "Clipping to [0, %d]. Re-run extract_patches.py if labels are wrong."
+                    % (min_label, max_label, self.nr_types, self.nr_types - 1)
+                )
+                self._type_warned = True
+            type_map = np.clip(type_map, 0, self.nr_types - 1)
+        return type_map.astype("int32")
 
     def __len__(self):
         return len(self.info_list)
@@ -119,6 +140,7 @@ class FileLoader(torch.utils.data.Dataset):
         if self.with_type:
             type_map = (ann[..., 1]).copy()
             type_map = cropping_center(type_map, self.mask_shape)
+            type_map = self._sanitize_type_map(type_map)
             feed_dict["tp_map"] = type_map
 
         target_dict = self.target_gen_func(

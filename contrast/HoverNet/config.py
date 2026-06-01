@@ -34,8 +34,9 @@ class Config(object):
         if model_mode not in ["original", "fast"]:
             raise Exception("Must use either `original` or `fast` as model mode")
 
-        # 细胞核类型数（含背景）。CoNSeP 合并后为 5（背景 + 3 类细胞 + 1 合并类）
+        # 细胞核类型数（含背景）。CoNSeP 合并 3 类细胞 + 背景 → 0~3，共 4 类
         nr_type = 4
+        self.nr_type = nr_type
 
         # 是否预测细胞核类型；能否开启取决于数据集是否提供 type_map
         self.type_classification = True

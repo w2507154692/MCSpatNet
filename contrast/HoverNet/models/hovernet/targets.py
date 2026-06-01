@@ -13,6 +13,14 @@ from misc.utils import center_pad_to_shape, cropping_center, get_bounding_box
 from dataloader.augs import fix_mirror_padding
 
 
+def _remove_small_instances(label_map, min_area=30):
+    """Remove connected components smaller than min_area pixels."""
+    try:
+        return morph.remove_small_objects(label_map, max_size=min_area - 1)
+    except TypeError:
+        return morph.remove_small_objects(label_map, min_size=min_area)
+
+
 ####
 def gen_instance_hv_map(ann, crop_shape):
     """Input annotation must be of original shape.
@@ -29,8 +37,8 @@ def gen_instance_hv_map(ann, crop_shape):
     fixed_ann = fix_mirror_padding(orig_ann)
     # re-cropping with fixed instance id map
     crop_ann = cropping_center(fixed_ann, crop_shape)
-    # TODO: deal with 1 label warning
-    crop_ann = morph.remove_small_objects(crop_ann, min_size=30)
+    if crop_ann.max() > 0:
+        crop_ann = _remove_small_instances(crop_ann, min_area=30)
 
     x_map = np.zeros(orig_ann.shape[:2], dtype=np.float32)
     y_map = np.zeros(orig_ann.shape[:2], dtype=np.float32)
