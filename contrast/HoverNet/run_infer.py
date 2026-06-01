@@ -1,5 +1,21 @@
 """run_infer.py
 
+HoVer-Net 推理入口脚本。
+
+支持两种子命令：
+  - tile：对常规图像 tile（png/jpg/tiff 等）做核分割与分类
+  - wsi  ：对全切片图像（OpenSlide 格式）做分块推理
+
+用法示例：
+  python run_infer.py tile --model_path=... --nr_types=4 --input_dir=... --output_dir=...
+  python run_infer.py wsi  --model_path=... --input_dir=... --output_dir=...
+
+子命令参数见 tile_cli / wsi_cli；也可执行：
+  python run_infer.py tile --help
+  python run_infer.py wsi --help
+
+注意：下方 docopt 文档串中的 Usage/Options 须保持英文关键字，否则解析会失败。
+
 Usage:
   run_infer.py [options] [--help] <command> [<args>...]
   run_infer.py --version
@@ -28,6 +44,7 @@ Two command mode are `tile` and `wsi` to enter corresponding inference mode
 Use `run_infer.py <command> --help` to show their options and usage.
 """
 
+# tile 模式：单张/目录下多张常规图像，见 infer/tile.py
 tile_cli = """
 Arguments for processing tiles.
 
@@ -47,6 +64,7 @@ options:
    --save_raw_map         To save raw prediction or not. [default: False]
 """
 
+# wsi 模式：全切片，见 infer/wsi.py
 wsi_cli = """
 Arguments for processing wsi
 
@@ -71,116 +89,139 @@ options:
     --save_mask             To save mask. [default: False]
 """
 
-import torch
 import logging
 import os
-import copy
-from misc.utils import log_info
+
+import torch
 from docopt import docopt
 
-#-------------------------------------------------------------------------------------------------------
+from misc.utils import log_info
 
-if __name__ == '__main__':
-    sub_cli_dict = {'tile' : tile_cli, 'wsi' : wsi_cli}
-    args = docopt(__doc__, help=False, options_first=True, 
-                    version='HoVer-Net Pytorch Inference v1.0')
-    sub_cmd = args.pop('<command>')
-    sub_cmd_args = args.pop('<args>')
+# -------------------------------------------------------------------------------------------------------
 
-    # ! TODO: where to save logging
+if __name__ == "__main__":
+    # 子命令 -> 对应 docopt 帮助文档
+    sub_cli_dict = {"tile": tile_cli, "wsi": wsi_cli}
+
+    # options_first=True：先解析全局选项，再解析 <command> 与 <args>
+    args = docopt(
+        __doc__,
+        help=False,
+        options_first=True,
+        version="HoVer-Net Pytorch Inference v1.0",
+    )
+    sub_cmd = args.pop("<command>")
+    sub_cmd_args = args.pop("<args>")
+
+    # ! TODO: 日志文件路径可改为可配置（当前固定为当前目录 debug.log）
     logging.basicConfig(
         level=logging.INFO,
-        format='|%(asctime)s.%(msecs)03d| [%(levelname)s] %(message)s',datefmt='%Y-%m-%d|%H:%M:%S',
+        format="|%(asctime)s.%(msecs)03d| [%(levelname)s] %(message)s",
+        datefmt="%Y-%m-%d|%H:%M:%S",
         handlers=[
             logging.FileHandler("debug.log"),
-            logging.StreamHandler()
-        ]
+            logging.StreamHandler(),
+        ],
     )
 
-    if args['--help'] and sub_cmd is not None:
-        if sub_cmd in sub_cli_dict: 
+    # 子命令级帮助：python run_infer.py tile --help
+    if args["--help"] and sub_cmd is not None:
+        if sub_cmd in sub_cli_dict:
             print(sub_cli_dict[sub_cmd])
         else:
             print(__doc__)
         exit()
-    if args['--help'] or sub_cmd is None:
+    if args["--help"] or sub_cmd is None:
         print(__doc__)
         exit()
 
+    # 解析 tile / wsi 子命令参数
     sub_args = docopt(sub_cli_dict[sub_cmd], argv=sub_cmd_args, help=True)
-    
-    args.pop('--version')
-    gpu_list = args.pop('--gpu')
-    os.environ['CUDA_VISIBLE_DEVICES'] = gpu_list
+
+    args.pop("--version")
+    gpu_list = args.pop("--gpu")
+    os.environ["CUDA_VISIBLE_DEVICES"] = gpu_list
 
     nr_gpus = torch.cuda.device_count()
-    log_info('Detect #GPUS: %d' % nr_gpus)
+    log_info("Detect #GPUS: %d" % nr_gpus)
 
-    args = {k.replace('--', '') : v for k, v in args.items()}
-    sub_args = {k.replace('--', '') : v for k, v in sub_args.items()}
-    if args['model_path'] == None:
-        raise Exception('A model path must be supplied as an argument with --model_path.')
+    # docopt 键去掉 '--' 前缀，便于后续用字典访问
+    args = {k.replace("--", ""): v for k, v in args.items()}
+    sub_args = {k.replace("--", ""): v for k, v in sub_args.items()}
 
-    nr_types = int(args['nr_types']) if int(args['nr_types']) > 0 else None
+    if args["model_path"] == None:
+        raise Exception(
+            "A model path must be supplied as an argument with --model_path."
+        )
+
+    # nr_types=0 表示仅分割、不预测类型；>0 时与训练 checkpoint 的类型头通道数一致
+    nr_types = int(args["nr_types"]) if int(args["nr_types"]) > 0 else None
     method_args = {
-        'method' : {
-            'model_args' : {
-                'nr_types'   : nr_types,
-                'mode'       : args['model_mode'],
+        "method": {
+            "model_args": {
+                "nr_types": nr_types,
+                "mode": args["model_mode"],  # 'original' 或 'fast'，须与 checkpoint 训练模式一致
             },
-            'model_path' : args['model_path'],
+            "model_path": args["model_path"],
         },
-        'type_info_path'  : None if args['type_info_path'] == '' \
-                            else args['type_info_path'],
+        # 类型 id -> 名称/颜色的 JSON；空字符串表示不使用
+        "type_info_path": None
+        if args["type_info_path"] == ""
+        else args["type_info_path"],
     }
 
     # ***
+    # 推理与后处理共用运行参数
     run_args = {
-        'batch_size' : int(args['batch_size']) * nr_gpus,
-
-        'nr_inference_workers' : int(args['nr_inference_workers']),
-        'nr_post_proc_workers' : int(args['nr_post_proc_workers']),
+        "batch_size": int(args["batch_size"]) * nr_gpus,  # 总 batch = 每卡 batch × GPU 数
+        "nr_inference_workers": int(args["nr_inference_workers"]),
+        "nr_post_proc_workers": int(args["nr_post_proc_workers"]),
     }
 
-    if args['model_mode'] == 'fast':
-        run_args['patch_input_shape'] = 256
-        run_args['patch_output_shape'] = 164
+    # patch 输入/输出尺寸须与 model_mode 一致（与 config.py / 训练时相同）
+    if args["model_mode"] == "fast":
+        run_args["patch_input_shape"] = 256
+        run_args["patch_output_shape"] = 164
     else:
-        run_args['patch_input_shape'] = 270
-        run_args['patch_output_shape'] = 80
+        run_args["patch_input_shape"] = 270
+        run_args["patch_output_shape"] = 80
 
-    if sub_cmd == 'tile':
-        run_args.update({
-            'input_dir'      : sub_args['input_dir'],
-            'output_dir'     : sub_args['output_dir'],
+    if sub_cmd == "tile":
+        run_args.update(
+            {
+                "input_dir": sub_args["input_dir"],
+                "output_dir": sub_args["output_dir"],
+                "mem_usage": float(sub_args["mem_usage"]),  # 缓存占用物理+交换内存比例上限
+                "draw_dot": sub_args["draw_dot"],  # 是否在 overlay 上画核质心
+                "save_qupath": sub_args["save_qupath"],  # 是否导出 QuPath 0.2.3 格式
+                "save_raw_map": sub_args["save_raw_map"],  # 是否保存原始预测图
+            }
+        )
 
-            'mem_usage'   : float(sub_args['mem_usage']),
-            'draw_dot'    : sub_args['draw_dot'],
-            'save_qupath' : sub_args['save_qupath'],
-            'save_raw_map': sub_args['save_raw_map'],
-        })
-
-    if sub_cmd == 'wsi':
-        run_args.update({
-            'input_dir'      : sub_args['input_dir'],
-            'output_dir'     : sub_args['output_dir'],
-            'input_mask_dir' : sub_args['input_mask_dir'],
-            'cache_path'     : sub_args['cache_path'],
-
-            'proc_mag'       : int(sub_args['proc_mag']),
-            'ambiguous_size' : int(sub_args['ambiguous_size']),
-            'chunk_shape'    : int(sub_args['chunk_shape']),
-            'tile_shape'     : int(sub_args['tile_shape']),
-            'save_thumb'     : sub_args['save_thumb'],
-            'save_mask'      : sub_args['save_mask'],
-        })
+    if sub_cmd == "wsi":
+        run_args.update(
+            {
+                "input_dir": sub_args["input_dir"],
+                "output_dir": sub_args["output_dir"],
+                "input_mask_dir": sub_args["input_mask_dir"],
+                "cache_path": sub_args["cache_path"],
+                "proc_mag": int(sub_args["proc_mag"]),  # WSI 处理倍率（如 40×）
+                "ambiguous_size": int(sub_args["ambiguous_size"]),  #  tile 边界模糊区重后处理宽度
+                "chunk_shape": int(sub_args["chunk_shape"]),
+                "tile_shape": int(sub_args["tile_shape"]),
+                "save_thumb": sub_args["save_thumb"],
+                "save_mask": sub_args["save_mask"],
+            }
+        )
     # ***
-    
-    if sub_cmd == 'tile':
+
+    if sub_cmd == "tile":
         from infer.tile import InferManager
+
         infer = InferManager(**method_args)
         infer.process_file_list(run_args)
     else:
         from infer.wsi import InferManager
+
         infer = InferManager(**method_args)
         infer.process_wsi_list(run_args)
