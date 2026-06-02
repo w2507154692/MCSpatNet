@@ -32,10 +32,18 @@ if __name__ == "__main__":
     # 边界处理方式：'mirror' 对边界镜像 padding；'valid' 仅提取完全在图像内的区域
     extract_type = "mirror"
 
-    # 数据集名称，可选 kumar / cpm17 / consep
+    # 数据集名称，可选 kumar / cpm17 / consep / monusac
     # 用于从 dataset.py 获取对应的 load_img / load_ann 实现
     dataset_name = "consep"
     save_root = "../data/CoNSeP_HoverNet/"
+
+    # MoNuSAC 示例（需先运行 MoNuSAC数据集处理.ipynb 生成 ../data/MoNuSAC_seg）:
+    # dataset_name = "monusac"
+    # save_root = "../data/MoNuSAC_HoverNet/"
+    # dataset_info = {
+    #     "train": {"img": (".png", "../data/MoNuSAC_seg/train/Images/"), "ann": (".mat", "../data/MoNuSAC_seg/train/Labels/")},
+    #     "valid": {"img": (".png", "../data/MoNuSAC_seg/val/Images/"), "ann": (".mat", "../data/MoNuSAC_seg/val/Labels/")},
+    # }
 
     # 各 split 的图像与标注路径配置
     # 键：img / ann -> (文件后缀, 目录路径)

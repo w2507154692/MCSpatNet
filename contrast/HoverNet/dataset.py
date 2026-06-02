@@ -116,11 +116,29 @@ class __CoNSeP(__AbstractDataset):
 
 
 ####
+class __MoNuSAC(__AbstractDataset):
+    """MoNuSAC 分割 patch 加载器（inst_map + type_map，4 类细胞）。"""
+
+    def load_img(self, path):
+        return cv2.cvtColor(cv2.imread(path), cv2.COLOR_BGR2RGB)
+
+    def load_ann(self, path, with_type=False):
+        mat = sio.loadmat(path)
+        ann_inst = mat["inst_map"].astype("int32")
+        if with_type:
+            ann_type = mat["type_map"].astype("int32")
+            ann = np.dstack([ann_inst, ann_type])
+        else:
+            ann = np.expand_dims(ann_inst, -1)
+        return ann
+
+
+####
 def get_dataset(name):
     """根据名称返回预定义的数据集加载器实例。
 
     Args:
-        name: 数据集名称，不区分大小写。可选 'kumar'、'cpm17'、'consep'。
+        name: 数据集名称，不区分大小写。可选 'kumar'、'cpm17'、'consep'、'monusac'。
 
     Returns:
         对应数据集的 __AbstractDataset 子类实例。
@@ -129,6 +147,7 @@ def get_dataset(name):
         "kumar": lambda: __Kumar(),
         "cpm17": lambda: __CPM17(),
         "consep": lambda: __CoNSeP(),
+        "monusac": lambda: __MoNuSAC(),
     }
     if name.lower() in name_dict:
         return name_dict[name]()
