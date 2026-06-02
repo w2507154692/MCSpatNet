@@ -19,14 +19,17 @@ from skimage import io
 from skimage.draw import polygon as draw_polygon
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_EXP_DIR = (SCRIPT_DIR / "../exp/exp27_HoverNet_consep_e100_new_json").resolve()
-DEFAULT_GT_ROOT = (SCRIPT_DIR / "../data/CoNSeP_MCSpatNet_point_1000x1000/gt_custom").resolve()
-DEFAULT_IMG_ROOT = (SCRIPT_DIR / "../data/CoNSeP_MCSpatNet_point_1000x1000/images").resolve()
-DEFAULT_SPLIT_FILE = (SCRIPT_DIR / "../data/CoNSeP_point/data_splits/test_split.txt").resolve()
-DEFAULT_TYPE_INFO = SCRIPT_DIR / "type_info_consep.json"
+# DEFAULT_EXP_DIR = (SCRIPT_DIR / "../exp/exp27_HoverNet_consep_e100_new_json").resolve()
+# DEFAULT_GT_ROOT = (SCRIPT_DIR / "../data/CoNSeP_MCSpatNet_point_1000x1000/gt_custom").resolve()
+# DEFAULT_IMG_ROOT = (SCRIPT_DIR / "../data/CoNSeP_MCSpatNet_point_1000x1000/images").resolve()
+# DEFAULT_TYPE_INFO = SCRIPT_DIR / "type_info_consep.json"
+DEFAULT_EXP_DIR = (SCRIPT_DIR / "../exp/exp28_HoverNet_monusac_e100").resolve()
+DEFAULT_GT_ROOT = (SCRIPT_DIR / "../data/MoNuSAC_MCSpatNet_point/test/gt_custom").resolve()
+DEFAULT_IMG_ROOT = (SCRIPT_DIR / "../data/MoNuSAC_MCSpatNet_point/test/images").resolve()
+DEFAULT_TYPE_INFO = SCRIPT_DIR / "type_info_monusac.json"
 
 CLASS_IDS = (1, 2, 3)
-SQUARE_RADIUS = 5  # 5x5 square: center +/- 2 pixels
+SQUARE_RADIUS = 2  # 5x5 square: center +/- 2 pixels
 
 
 @dataclass
@@ -76,10 +79,17 @@ def load_type_info(type_info_path: Path) -> tuple[dict[int, str], dict[int, tupl
     return names, colors
 
 
-def load_split(split_file: Path) -> list[str]:
-    lines = split_file.read_text(encoding="utf-8").strip().splitlines()
-    return [line.strip() for line in lines if line.strip()]
-
+def list_eval_stems(gt_root: Path, json_dir: Path) -> list[str]:
+    stems: list[str] = []
+    for gt_path in sorted(gt_root.glob("*_gt_dots.npy")):
+        stem = gt_path.name[: -len("_gt_dots.npy")]
+        json_path = json_dir / f"{stem}.json"
+        if not json_path.is_file():
+            raise FileNotFoundError(f"Missing prediction json for {stem}: {json_path}")
+        stems.append(stem)
+    if not stems:
+        raise FileNotFoundError(f"No *_gt_dots.npy found in {gt_root}")
+    return stems
 
 def normalize_gt_dots(gt_dots: np.ndarray) -> np.ndarray:
     if gt_dots.ndim != 3:
@@ -264,7 +274,6 @@ def run_evaluation(
     exp_dir: Path,
     gt_root: Path,
     img_root: Path,
-    split_file: Path,
     type_info_path: Path,
     save_visualizations: bool = True,
 ) -> dict:
@@ -280,14 +289,10 @@ def run_evaluation(
     if save_visualizations:
         vis_dir.mkdir(parents=True, exist_ok=True)
 
-    for image_name in load_split(split_file):
-        stem = Path(image_name).stem
+    for stem in list_eval_stems(gt_root, json_dir):
         json_path = json_dir / f"{stem}.json"
         gt_path = gt_root / f"{stem}_gt_dots.npy"
-        if not json_path.is_file():
-            raise FileNotFoundError(f"Missing prediction json: {json_path}")
-        if not gt_path.is_file():
-            raise FileNotFoundError(f"Missing GT dots: {gt_path}")
+        image_name = f"{stem}.png"
 
         result = evaluate_image(json_path, gt_path)
         per_image_results.append(result)
@@ -338,8 +343,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate HoVer-Net CoNSeP json outputs against point GT.")
     parser.add_argument("--exp_dir", type=Path, default=DEFAULT_EXP_DIR, help="Experiment directory with json/ outputs.")
     parser.add_argument("--gt_root", type=Path, default=DEFAULT_GT_ROOT, help="Directory containing *_gt_dots.npy files.")
-    parser.add_argument("--img_root", type=Path, default=DEFAULT_IMG_ROOT, help="Optional image directory for visualization background.")
-    parser.add_argument("--split_file", type=Path, default=DEFAULT_SPLIT_FILE, help="Text file listing images to evaluate.")
+    parser.add_argument("--img_root", type=Path, default=DEFAULT_IMG_ROOT, help="Image directory for visualization background.")
     parser.add_argument("--type_info_path", type=Path, default=DEFAULT_TYPE_INFO, help="Type id/name/color mapping json.")
     parser.add_argument("--no_vis", action="store_true", help="Skip visualization export.")
     return parser.parse_args()
@@ -351,7 +355,6 @@ def main() -> None:
         exp_dir=args.exp_dir.resolve(),
         gt_root=args.gt_root.resolve(),
         img_root=args.img_root.resolve(),
-        split_file=args.split_file.resolve(),
         type_info_path=args.type_info_path.resolve(),
         save_visualizations=not args.no_vis,
     )

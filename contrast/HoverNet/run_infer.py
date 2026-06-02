@@ -90,6 +90,7 @@ options:
 """
 
 """
+CoNSeP
 python run_infer.py tile \
 --model_path="../exp/exp27_HoverNet_consep/01/net_epoch=50.tar" \
 --model_mode=original \
@@ -97,6 +98,15 @@ python run_infer.py tile \
 --input_dir="../data/CoNSeP_raw/Test/Images" \
 --output_dir="../exp/exp27_HoverNet_consep_e100_new_json" \
 --type_info_path="./type_info_consep.json"
+
+MoNuSAC
+python run_infer.py tile \
+--model_path="../exp/exp28_HoverNet_monusac/01/net_epoch=50.tar" \
+--model_mode=original \
+--nr_types=3 \
+--input_dir="../data/MoNuSAC/images/test" \
+--output_dir="../exp/exp28_HoverNet_monusac_e100" \
+--type_info_path="./type_info_monusac.json"
 """
 
 import logging
