@@ -144,7 +144,7 @@ def get_config(nr_type, mode):
                     ],
                     Events.EPOCH_COMPLETED: [
                         TrackLr(),  # 记录当前学习率
-                        PeriodicSaver(),  # 保存 net_epoch=*.tar
+                        PeriodicSaver(per_n_epoch=10),  # 每 10 个 epoch 保存 net_epoch=*.tar
                         VisualizeOutput(viz_step_output),  # 训练样本可视化到 TensorBoard
                         LoggingEpochOutput(),  # 打印指标并写 stats.json
                         TriggerEngine("valid"),  # 触发 valid 引擎跑一轮

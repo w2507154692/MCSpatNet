@@ -35,7 +35,7 @@ class Config(object):
             raise Exception("Must use either `original` or `fast` as model mode")
 
         # 细胞核类型数（含背景）。CoNSeP 合并 3 类细胞 + 背景 → 0~3，共 4 类
-        nr_type = 4
+        nr_type = 3
         self.nr_type = nr_type
 
         # 是否预测细胞核类型；能否开启取决于数据集是否提供 type_map
@@ -64,16 +64,16 @@ class Config(object):
                 )
 
         # 数据集名称，对应 dataset.py 中 get_dataset 的键（kumar / cpm17 / consep）
-        self.dataset_name = "consep"
+        self.dataset_name = "monusac"
         # checkpoint 与训练日志保存目录
-        self.log_dir = "../exp/exp27_HoverNet_consep"
+        self.log_dir = "../exp/exp28_HoverNet_monusac"
 
         # 训练 / 验证 patch 目录（各目录下应为预处理好的 .npy 文件）
         self.train_dir_list = [
-            "../data/CoNSeP_HoverNet/consep/train/540x540_164x164"
+            "../data/MoNuSAC_HoverNet/monusac/train/540x540_164x164"
         ]
         self.valid_dir_list = [
-            "../data/CoNSeP_HoverNet/consep/valid/540x540_164x164"
+            "../data/MoNuSAC_HoverNet/monusac/valid/540x540_164x164"
         ]
 
         # 各阶段 input_shape（网络输入）与 mask_shape（监督图尺寸）
