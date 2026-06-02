@@ -34,8 +34,8 @@ if __name__ == "__main__":
 
     # 数据集名称，可选 kumar / cpm17 / consep / monusac
     # 用于从 dataset.py 获取对应的 load_img / load_ann 实现
-    dataset_name = "consep"
-    save_root = "../data/CoNSeP_HoverNet/"
+    dataset_name = "monusac"
+    save_root = "../data/MoNuSAC_HoverNet/"
 
     # MoNuSAC 示例（需先运行 MoNuSAC数据集处理.ipynb 生成 ../data/MoNuSAC_seg）:
     # dataset_name = "monusac"
@@ -49,12 +49,12 @@ if __name__ == "__main__":
     # 键：img / ann -> (文件后缀, 目录路径)
     dataset_info = {
         "train": {
-            "img": (".png", "../data/CoNSeP_raw/Train/Images/"),
-            "ann": (".mat", "../data/CoNSeP_raw/Train/Labels/"),
+            "img": (".png", "../data/MoNuSAC_seg/Train/Images/"),
+            "ann": (".mat", "../data/MoNuSAC_seg/Train/Labels/"),
         },
         "valid": {
-            "img": (".png", "../data/CoNSeP_raw/Test/Images/"),
-            "ann": (".mat", "../data/CoNSeP_raw/Test/Labels/"),
+            "img": (".png", "../data/MoNuSAC_seg/Val/Images/"),
+            "ann": (".mat", "../data/MoNuSAC_seg/Val/Labels/"),
         },
     }
 

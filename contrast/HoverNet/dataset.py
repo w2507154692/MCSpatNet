@@ -117,7 +117,14 @@ class __CoNSeP(__AbstractDataset):
 
 ####
 class __MoNuSAC(__AbstractDataset):
-    """MoNuSAC 分割 patch 加载器（inst_map + type_map，4 类细胞）。"""
+    """MoNuSAC 分割 patch 加载器（inst_map + type_map，2 类细胞 + 背景）。
+
+    原始 label_id：1=Epithelial，2=Lymphocyte，3=Macrophage，4=Neutrophil。
+    与 MCSpatNet 一致，仅保留前两类；3/4 类像素与实例置为背景。
+    训练时 config.nr_type 应设为 3（背景 + 2 类细胞）。
+    """
+
+    _ACTIVE_TYPE_IDS = (1, 2)
 
     def load_img(self, path):
         return cv2.cvtColor(cv2.imread(path), cv2.COLOR_BGR2RGB)
@@ -127,8 +134,14 @@ class __MoNuSAC(__AbstractDataset):
         ann_inst = mat["inst_map"].astype("int32")
         if with_type:
             ann_type = mat["type_map"].astype("int32")
+            keep_mask = np.isin(ann_type, self._ACTIVE_TYPE_IDS)
+            ann_inst = np.where(keep_mask, ann_inst, 0).astype("int32")
+            ann_type = np.where(keep_mask, ann_type, 0).astype("int32")
             ann = np.dstack([ann_inst, ann_type])
         else:
+            ann_type = mat["type_map"].astype("int32")
+            keep_mask = np.isin(ann_type, self._ACTIVE_TYPE_IDS)
+            ann_inst = np.where(keep_mask, ann_inst, 0).astype("int32")
             ann = np.expand_dims(ann_inst, -1)
         return ann
 
