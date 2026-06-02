@@ -13,8 +13,8 @@ import cv2
 import scipy
 
 # 配置变量。
-in_root_dir = '../../MCSpatNet_datasets/CoNSeP/Train'
-out_root_dir = '../../MCSpatNet_datasets/CoNSeP_train'
+in_root_dir = '../data/CoNSeP_raw/Test'
+out_root_dir = '../data/CoNSeP_point_1000x1000'
 # 原始类别索引的最大值。这里类别索引从 1 开始，0 通常作为背景保留。
 classes_max_indx = 8
 # 可视化时使用的颜色映射：炎症细胞为蓝色，上皮/肿瘤细胞为红色，基质细胞为绿色。
@@ -24,7 +24,7 @@ color_set = {1: (0, 162, 232), 2: (255, 0, 0), 3: (0, 255, 0)}
 class_group_mapping_dict = {1:[2],2:[3,4],3:[1,5,6,7]}
 n_grouped_class_channels = 4    # 3个类别加上背景
 # 图像缩放比例。原始 patch 与细胞中心坐标会按相同比例缩小。
-img_scale = 0.5
+img_scale = 1.0
 remove_duplicates = False  # 若为 True，则去除 5 像素邻域内重复标注的细胞点。
 '''
 原始细胞类别：
