@@ -89,6 +89,16 @@ options:
     --save_mask             To save mask. [default: false]
 """
 
+"""
+python run_infer.py tile \
+--model_path="../exp/exp27_HoverNet_consep/01/net_epoch=50.tar" \
+--model_mode=original \
+--nr_types=4 \
+--input_dir="../data/CoNSeP_raw/Test/Images" \
+--output_dir="../exp/exp27_HoverNet_consep_e100_new_json" \
+--type_info_path="./type_info_consep.json"
+"""
+
 import logging
 import os
 import sys
