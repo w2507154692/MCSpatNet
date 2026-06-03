@@ -104,7 +104,7 @@ python run_infer.py tile \
 --model_path="../exp/exp28_HoverNet_monusac/01/net_epoch=50.tar" \
 --model_mode=original \
 --nr_types=3 \
---input_dir="../data/MoNuSAC/images/test" \
+--input_dir="../data/MoNuSAC_seg/test/Images" \
 --output_dir="../exp/exp28_HoverNet_monusac_e100" \
 --type_info_path="./type_info_monusac.json"
 """

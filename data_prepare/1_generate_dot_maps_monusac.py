@@ -15,7 +15,7 @@ from scipy import ndimage
 
 # 配置变量。
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-in_root_dir = os.path.normpath(os.path.join(SCRIPT_DIR, "../data/MoNuSAC_point_MCSpatNet"))
+in_root_dir = os.path.normpath(os.path.join(SCRIPT_DIR, "../data/MoNuSAC_point"))
 annotations_csv = os.path.join(in_root_dir, "annotations", "points.csv")
 DATA_SPLITS = ("train", "val", "test")
 

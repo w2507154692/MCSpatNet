@@ -283,9 +283,13 @@ class CoNSePE2ECRDataset(SplitFileGtDotsDataset):
 
 
 class MoNuSACDataset(E2ECRDatasetBase):
-	"""读取 MoNuSAC_point：按 images/{phase}/ 目录划分，点标注来自 annotations/points.csv。"""
+	"""读取 MoNuSAC_point：按 images/{phase}/ 目录划分，点标注来自 annotations/points.csv。
+
+	仅保留前两类：1=Epithelial，2=Lymphocyte；Macrophage/Neutrophil 会被忽略。
+	"""
 
 	use_random_crop = True
+	_ACTIVE_LABEL_IDS = frozenset({1, 2})
 
 	def _setup_dataset_index(self) -> None:
 		self.annotations_csv = self.data_root / "annotations" / "points.csv"
@@ -338,8 +342,8 @@ class MoNuSACDataset(E2ECRDatasetBase):
 					continue
 
 				label_id = int(row["label_id"])
-				if label_id < 1:
-					raise ValueError(f"MoNuSAC 前景 label_id 必须从 1 开始，实际为 {label_id}")
+				if label_id not in self._ACTIVE_LABEL_IDS:
+					continue
 				raw_points.setdefault(image_path, []).append(
 					(float(row["x"]), float(row["y"]), label_id - 1)
 				)
@@ -416,7 +420,7 @@ def get_e2ecr_num_classes(dataset_type: str) -> int:
 	class_registry = {
 		"brca-m2c": 3,
 		"consep": 3,
-		"monusac": 4,
+		"monusac": 2,
 	}
 	if dataset_type_normalized not in class_registry:
 		raise ValueError(
@@ -437,9 +441,9 @@ _E2ECR_CLASS_VIZ = {
 		"pred_colors": ["blue", "red", "yellow"],
 	},
 	"monusac": {
-		"names": ["Epithelial", "Lymphocyte", "Macrophage", "Neutrophil"],
-		"gt_colors": ["red", "lime", "blue", "yellow"],
-		"pred_colors": ["red", "lime", "blue", "yellow"],
+		"names": ["Epithelial", "Lymphocyte"],
+		"gt_colors": ["red", "lime"],
+		"pred_colors": ["red", "lime"],
 	},
 }
 

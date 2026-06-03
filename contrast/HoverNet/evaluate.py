@@ -28,7 +28,7 @@ DEFAULT_GT_ROOT = (SCRIPT_DIR / "../data/MoNuSAC_MCSpatNet_point/test/gt_custom"
 DEFAULT_IMG_ROOT = (SCRIPT_DIR / "../data/MoNuSAC_MCSpatNet_point/test/images").resolve()
 DEFAULT_TYPE_INFO = SCRIPT_DIR / "type_info_monusac.json"
 
-CLASS_IDS = (1, 2, 3)
+CLASS_IDS = (1, 2)
 SQUARE_RADIUS = 2  # 5x5 square: center +/- 2 pixels
 
 
@@ -95,10 +95,17 @@ def normalize_gt_dots(gt_dots: np.ndarray) -> np.ndarray:
     if gt_dots.ndim != 3:
         raise ValueError(f"gt_dots must be 3D, got shape {gt_dots.shape}")
     if gt_dots.shape[2] == 4:
+        # CoNSeP: [background, inflammatory, epithelial, stroma]
         return gt_dots[:, :, 1:4].astype(np.uint8)
     if gt_dots.shape[2] == 3:
+        # MoNuSAC: [background, epithelial, lymphocyte]，通道 0 为背景且恒为 0
+        if gt_dots[:, :, 0].max() == 0:
+            return gt_dots[:, :, 1:].astype(np.uint8)
+        # CoNSeP 等：3 个类别通道直接对应 class 1~3
         return gt_dots.astype(np.uint8)
-    raise ValueError(f"gt_dots channel count must be 3 or 4, got {gt_dots.shape[2]}")
+    if gt_dots.shape[2] == 2:
+        return gt_dots.astype(np.uint8)
+    raise ValueError(f"gt_dots channel count must be 2, 3 or 4, got {gt_dots.shape[2]}")
 
 
 def extract_gt_points(gt_dots: np.ndarray) -> dict[int, list[tuple[int, int]]]:
@@ -251,7 +258,7 @@ def format_metrics_text(
             f"P={metrics['precision']:.4f} R={metrics['recall']:.4f} F1={metrics['f1']:.4f}"
         )
     mean_f1 = float(np.mean(class_f1_values))
-    lines.extend(["", f"Mean F1 (3 classes) = {mean_f1:.4f}", ""])
+    lines.extend(["", f"Mean F1 ({len(class_names)} classes) = {mean_f1:.4f}", ""])
     det_metrics = detection_total.as_dict()
     lines.append(
         f"[Detection only] TP={detection_total.tp} FP={detection_total.fp} FN={detection_total.fn} | "
